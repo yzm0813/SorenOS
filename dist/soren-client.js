@@ -26,11 +26,11 @@
     el('coreDot').classList.toggle('online', online);
     el('coreStatusText').textContent = online ? 'Soren Core · connected' : 'Soren Core · disconnected';
   }
-  async function request(path, options = {}) {
+  async function request(path, options = {}, timeout = 5000) {
     const response = await fetch(`${state.baseUrl}${path}`, {
       ...options,
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(timeout)
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.message || `连接失败（${response.status}）`);
@@ -62,9 +62,15 @@
     el('coreUrl').focus();
   }
   function closeConnections() { modal.hidden = true; }
-  async function sendChat(message) {
+  async function getModels() {
+    const data = await request('/api/models', {}, 20000);
+    const models = Array.isArray(data.models) ? data.models : [];
+    window.SorenUI.setModels(models);
+    return models;
+  }
+  async function sendChat(message, options = {}) {
     try {
-      const data = await request('/api/chat/send', { method: 'POST', body: JSON.stringify({ message }) });
+      const data = await request('/api/chat/send', { method: 'POST', body: JSON.stringify({ message, model: options.model || '', effort: options.effort || '' }) }, 10 * 60_000);
       return data.reply;
     } catch (error) {
       if (error.name === 'TimeoutError' || error instanceof TypeError) {
@@ -121,7 +127,7 @@
   el('timelineRefresh').addEventListener('click', refreshTimeline);
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeConnections(); });
 
-  window.SorenCore = { connect, sendChat, get baseUrl() { return state.baseUrl; } };
-  connect().then(online => { if (online) { refreshMemory(false); refreshTimeline(); pollInbox(); } });
+  window.SorenCore = { connect, sendChat, getModels, openConnections, get baseUrl() { return state.baseUrl; } };
+  connect().then(online => { if (online) { refreshMemory(false); refreshTimeline(); pollInbox(); getModels().catch(() => {}); } });
   setInterval(pollInbox, 15000);
 })();
