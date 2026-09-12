@@ -2,18 +2,25 @@ import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const root = fileURLToPath(new URL('../dist/', import.meta.url));
+const require = createRequire(import.meta.url);
+const { CyberbossAdapter } = require('./cyberboss-adapter.cjs');
+const cyberbossStateDir = fileURLToPath(new URL('../../data/cyberboss/', import.meta.url));
+const cyberboss = new CyberbossAdapter({ stateDir: cyberbossStateDir });
 const host = process.env.SOREN_HOST || '127.0.0.1';
 const port = Number(process.env.SOREN_PORT || 8787);
 const allowedOrigin = process.env.SOREN_SITE_ORIGIN || '*';
 const adapters = {
-  codex: process.env.CODEX_APP_SERVER_URL || '',
-  ombre: process.env.OMBRE_MCP_URL || '',
-  cyberboss: process.env.CYBERBOSS_URL || '',
+  codex: process.env.CODEX_APP_SERVER_URL || 'http://127.0.0.1:8765/readyz',
+  ombre: process.env.OMBRE_MCP_URL || 'http://127.0.0.1:18001/health',
+  cyberboss: process.env.CYBERBOSS_URL || 'http://127.0.0.1:8765/readyz',
   games: process.env.GAME_MCP_URL || '',
   music: process.env.MUSIC_MCP_URL || ''
 };
+const codexChatUrl = process.env.CODEX_CHAT_URL || '';
+const ombreMcpUrl = process.env.OMBRE_MCP_ENDPOINT || 'http://127.0.0.1:18001/mcp';
 
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp' };
 const cors = () => ({ 'Access-Control-Allow-Origin': allowedOrigin, 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' });
@@ -29,7 +36,10 @@ async function probe(url) {
   }
 }
 async function serviceState() {
-  const entries = await Promise.all(Object.entries(adapters).map(async ([name, url]) => [name, await probe(url)]));
+  const entries = await Promise.all(Object.entries(adapters).map(async ([name, url]) => [
+    name,
+    name === 'cyberboss' ? cyberboss.status() : await probe(url)
+  ]));
   return Object.fromEntries(entries);
 }
 async function readBody(req) {
@@ -41,8 +51,8 @@ async function readBody(req) {
   return raw ? JSON.parse(raw) : {};
 }
 async function forwardChat(message) {
-  if (!adapters.codex) return null;
-  const response = await fetch(`${adapters.codex.replace(/\/$/, '')}/chat`, {
+  if (!codexChatUrl) return null;
+  const response = await fetch(codexChatUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message }),
@@ -51,6 +61,19 @@ async function forwardChat(message) {
   if (!response.ok) throw new Error(`Codex adapter returned ${response.status}`);
   const data = await response.json();
   return data.reply || data.output_text || data.message;
+}
+async function callOmbre(name, args = {}) {
+  const response = await fetch(ombreMcpUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name, arguments: args } }),
+    signal: AbortSignal.timeout(30_000)
+  });
+  if (!response.ok) throw new Error(`Ombre Brain returned ${response.status}`);
+  const data = await response.json();
+  if (data.error) throw new Error(data.error.message || 'Ombre Brain error');
+  const content = data.result?.content || [];
+  return content.filter(item => item.type === 'text').map(item => item.text).join('\n');
 }
 async function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -84,6 +107,35 @@ const server = http.createServer(async (req, res) => {
       if (!reply) return json(res, 503, { code: 'codex_not_configured', message: 'Soren Core 已连接，但 Codex Runtime 还没有配置。' });
       return json(res, 200, { reply });
     }
+    if (req.method === 'POST' && url.pathname === '/api/memory/breath') {
+      return json(res, 200, { content: await callOmbre('breath') });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/memory/search') {
+      const input = await readBody(req);
+      if (!input.query?.trim()) return json(res, 400, { message: '搜索内容不能为空' });
+      return json(res, 200, { content: await callOmbre('breath_search', { query: input.query.trim(), max_results: 10 }) });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/memory/hold') {
+      const input = await readBody(req);
+      if (!input.content?.trim()) return json(res, 400, { message: '记忆内容不能为空' });
+      return json(res, 200, { content: await callOmbre('hold', { content: input.content.trim(), title: input.title || '', domain: input.domain || '', importance: Number(input.importance || 5) }) });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/reminders') return json(res, 200, { reminders: cyberboss.listReminders() });
+    if (req.method === 'POST' && url.pathname === '/api/reminders') {
+      const input = await readBody(req);
+      return json(res, 201, { reminder: cyberboss.createReminder(input) });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/inbox') return json(res, 200, { messages: cyberboss.listInbox() });
+    if (req.method === 'GET' && url.pathname === '/api/timeline') return json(res, 200, { events: cyberboss.listTimeline() });
+    if (req.method === 'POST' && url.pathname === '/api/timeline') {
+      const input = await readBody(req);
+      return json(res, 201, { event: cyberboss.addTimeline(input) });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/device/snapshot') return json(res, 200, { snapshot: cyberboss.deviceSnapshot() });
+    if (req.method === 'POST' && url.pathname === '/api/device/ingest') {
+      const input = await readBody(req);
+      return json(res, 202, { accepted: true, point: cyberboss.ingestDevice(input) });
+    }
     if (url.pathname.startsWith('/api/')) return json(res, 404, { message: 'Unknown API route' });
     return serveStatic(req, res);
   } catch (error) {
@@ -91,4 +143,5 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+setInterval(() => cyberboss.pollDue(), 5000).unref();
 server.listen(port, host, () => console.log(`Soren Core running at http://${host}:${port}`));

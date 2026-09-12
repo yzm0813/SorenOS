@@ -8,6 +8,7 @@
     music: ['Music MCP', '共同播放与歌单控制']
   };
   const state = { baseUrl: localStorage.getItem('soren_core_url') || DEFAULT_URL, services: {} };
+  const seenInbox = new Set(JSON.parse(localStorage.getItem('soren_seen_inbox') || '[]'));
   const el = id => document.getElementById(id);
   const modal = el('connectionsModal');
   const normalizeUrl = value => value.trim().replace(/\/$/, '');
@@ -73,6 +74,41 @@
       throw error;
     }
   }
+  async function refreshMemory(notify = true) {
+    try {
+      const data = await request('/api/memory/breath', { method: 'POST', body: '{}' });
+      el('memoryContent').textContent = data.content || 'Ombre 已连接，目前还没有留下长期记忆。';
+      if (notify) showToast('Ombre 记忆已更新');
+    } catch (error) {
+      el('memoryContent').textContent = error.message || 'Ombre 暂时不可用';
+    }
+  }
+  async function refreshTimeline() {
+    try {
+      const data = await request('/api/timeline');
+      const events = data.events || [];
+      el('timelineContent').innerHTML = events.length ? events.map(event => {
+        const time = new Date(event.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        return `<div class="event"><time>${time}</time><h3>${escapeHtml(event.title)}</h3><p>${escapeHtml(event.detail || '')}</p></div>`;
+      }).join('') : '<div class="event"><time>NOW</time><h3>时间线已经连接</h3><p>新的提醒、手机状态和主动事件会从这里开始记录。</p></div>';
+    } catch {}
+  }
+  async function pollInbox() {
+    if (!el('coreDot').classList.contains('online')) return;
+    try {
+      const data = await request('/api/inbox');
+      for (const message of data.messages || []) {
+        if (seenInbox.has(message.id)) continue;
+        seenInbox.add(message.id);
+        window.SorenUI.addMessage(message.text);
+      }
+      const ids = [...seenInbox].slice(-200);
+      localStorage.setItem('soren_seen_inbox', JSON.stringify(ids));
+    } catch {}
+  }
+  function escapeHtml(value) {
+    return String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  }
 
   el('connectionsBtn').addEventListener('click', openConnections);
   el('settingsBtn').addEventListener('click', openConnections);
@@ -81,8 +117,11 @@
   el('connectionsClose').addEventListener('click', closeConnections);
   modal.addEventListener('click', event => { if (event.target === modal) closeConnections(); });
   el('connectForm').addEventListener('submit', async event => { event.preventDefault(); await connect(el('coreUrl').value, true); });
+  el('memoryRefresh').addEventListener('click', () => refreshMemory());
+  el('timelineRefresh').addEventListener('click', refreshTimeline);
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeConnections(); });
 
   window.SorenCore = { connect, sendChat, get baseUrl() { return state.baseUrl; } };
-  connect();
+  connect().then(online => { if (online) { refreshMemory(false); refreshTimeline(); pollInbox(); } });
+  setInterval(pollInbox, 15000);
 })();
