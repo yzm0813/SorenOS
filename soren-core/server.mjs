@@ -7,8 +7,15 @@ import { createRequire } from 'node:module';
 const root = fileURLToPath(new URL('../dist/', import.meta.url));
 const require = createRequire(import.meta.url);
 const { CyberbossAdapter } = require('./cyberboss-adapter.cjs');
+const { CodexAdapter } = require('./codex-adapter.cjs');
 const cyberbossStateDir = fileURLToPath(new URL('../../data/cyberboss/', import.meta.url));
 const cyberboss = new CyberbossAdapter({ stateDir: cyberbossStateDir });
+const siteRoot = fileURLToPath(new URL('../', import.meta.url));
+const codex = new CodexAdapter({
+  endpoint: process.env.CODEX_APP_SERVER_ENDPOINT || 'ws://127.0.0.1:8765',
+  workspaceRoot: siteRoot,
+  stateFile: join(cyberbossStateDir, 'soren-codex-thread.json')
+});
 const host = process.env.SOREN_HOST || '127.0.0.1';
 const port = Number(process.env.SOREN_PORT || 8787);
 const allowedOrigin = process.env.SOREN_SITE_ORIGIN || '*';
@@ -19,7 +26,6 @@ const adapters = {
   games: process.env.GAME_MCP_URL || '',
   music: process.env.MUSIC_MCP_URL || ''
 };
-const codexChatUrl = process.env.CODEX_CHAT_URL || '';
 const ombreMcpUrl = process.env.OMBRE_MCP_ENDPOINT || 'http://127.0.0.1:18001/mcp';
 
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp' };
@@ -49,18 +55,6 @@ async function readBody(req) {
     if (raw.length > 1_000_000) throw new Error('请求内容过大');
   }
   return raw ? JSON.parse(raw) : {};
-}
-async function forwardChat(message) {
-  if (!codexChatUrl) return null;
-  const response = await fetch(codexChatUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
-    signal: AbortSignal.timeout(30_000)
-  });
-  if (!response.ok) throw new Error(`Codex adapter returned ${response.status}`);
-  const data = await response.json();
-  return data.reply || data.output_text || data.message;
 }
 async function callOmbre(name, args = {}) {
   const response = await fetch(ombreMcpUrl, {
@@ -100,12 +94,17 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, name: 'soren-core', version: 1 });
     if (req.method === 'GET' && url.pathname === '/api/bootstrap') return json(res, 200, { core: { connected: true, version: 1 }, services: await serviceState() });
+    if (req.method === 'GET' && url.pathname === '/api/models') return json(res, 200, { models: await codex.models() });
     if (req.method === 'POST' && url.pathname === '/api/chat/send') {
       const input = await readBody(req);
       if (!input.message?.trim()) return json(res, 400, { message: '消息不能为空' });
-      const reply = await forwardChat(input.message.trim());
-      if (!reply) return json(res, 503, { code: 'codex_not_configured', message: 'Soren Core 已连接，但 Codex Runtime 还没有配置。' });
-      return json(res, 200, { reply });
+      const memory = await callOmbre('breath').catch(() => '');
+      const result = await codex.chat(input.message.trim(), {
+        memory,
+        model: typeof input.model === 'string' ? input.model : '',
+        effort: typeof input.effort === 'string' ? input.effort : ''
+      });
+      return json(res, 200, result);
     }
     if (req.method === 'POST' && url.pathname === '/api/memory/breath') {
       return json(res, 200, { content: await callOmbre('breath') });
