@@ -2,6 +2,7 @@ node_modules/
 .pnpm-store/
 .sites-runtime/
 apps/*/dist/
+/dist/
 *.log
 *.tsbuildinfo
 .env

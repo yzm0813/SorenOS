@@ -29,6 +29,8 @@ pnpm --filter @soren/core dev
 
 打开 `http://127.0.0.1:8787`。Codex app-server 默认使用 `ws://127.0.0.1:8765`，Ombre Brain 默认使用 `http://127.0.0.1:18001/mcp`。
 
+当前架构、已实现范围、API、事件协议与数据库迁移基线见 [`docs/phase-0-baseline.md`](docs/phase-0-baseline.md)。
+
 ## 隐私边界
 
 服务默认只监听 `127.0.0.1`。文件接口只接受项目 ID 和相对路径，并拒绝目录穿越及符号链接；聊天、记忆、附件、日志与 Workspace 文件保存在本机 `data/`。

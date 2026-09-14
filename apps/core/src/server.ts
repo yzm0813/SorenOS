@@ -16,7 +16,7 @@ const workspaceRoot = join(dataRoot, 'workspace');
 const personaRoot = join(dataRoot, 'persona');
 const attachmentRoot = join(dataRoot, 'attachments');
 const logRoot = join(dataRoot, 'logs');
-const webDist = join(appRoot, 'apps', 'web', 'dist');
+const webDist = join(appRoot, 'dist');
 await Promise.all([mkdir(dataRoot,{recursive:true}),mkdir(workspaceRoot,{recursive:true}),mkdir(personaRoot,{recursive:true}),mkdir(attachmentRoot,{recursive:true}),mkdir(logRoot,{recursive:true})]);
 
 const db = new SorenDatabase(join(dataRoot, 'soren.db'));
