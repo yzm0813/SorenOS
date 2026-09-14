@@ -62,6 +62,32 @@ export const migrations: SchemaMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_home_notes_current ON home_notes(archived_at, updated_at DESC);
     `,
   },
+  {
+    version: 3,
+    name: 'shared_memory_index',
+    sql: `
+      CREATE TABLE IF NOT EXISTS memory_records (
+        id TEXT PRIMARY KEY,
+        fingerprint TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL,
+        scope TEXT NOT NULL DEFAULT 'long_term',
+        project_id TEXT,
+        importance INTEGER NOT NULL DEFAULT 5,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        source_type TEXT NOT NULL,
+        source_id TEXT,
+        provenance TEXT NOT NULL DEFAULT '',
+        remote_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        archived INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_active_importance ON memory_records(archived, pinned DESC, importance DESC, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_records(project_id, archived, updated_at DESC);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0;

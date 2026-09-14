@@ -43,7 +43,7 @@ test('adopts the legacy schema without losing existing rows', () => {
     const migrated = new SorenDatabase(file);
     assert.equal(migrated.db.pragma('user_version', { simple: true }), latestSchemaVersion);
     assert.equal(migrated.conversationById('kept-conversation')?.title, '保留的会话');
-    assert.deepEqual(migrated.db.prepare('SELECT version,name FROM schema_migrations ORDER BY version').all(), [{ version: 1, name: 'baseline_schema' },{version:2,name:'home_notes'}]);
+    assert.deepEqual(migrated.db.prepare('SELECT version,name FROM schema_migrations ORDER BY version').all(), [{ version: 1, name: 'baseline_schema' },{version:2,name:'home_notes'},{version:3,name:'shared_memory_index'}]);
     migrated.db.close();
 
     const reopened = new SorenDatabase(file);

@@ -6,10 +6,11 @@ import { createRequire } from 'node:module';
 import { CodexRuntime } from '@soren/runtime-codex';
 import { WorkspaceService, slugifyProject } from '@soren/workspace';
 import { OmbreMemory } from '@soren/memory';
-import { McpHttpClient } from '@soren/mcp-client';
 import type { HomeTodayItem, ThinkingDepth, ThinkingMode, ToolPermission, TurnEvent, WeatherLocation, WeatherSnapshot } from '@soren/shared';
 import { SorenDatabase } from './db.js';
 import { emptyWeather, OpenMeteoWeatherProvider } from './weather.js';
+import { MemoryService } from './memory-service.js';
+import { buildTurnContext } from './context.js';
 
 const appRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const dataRoot = resolve(appRoot, '..', 'data');
@@ -24,7 +25,8 @@ const db = new SorenDatabase(join(dataRoot, 'soren.db'));
 const homeNote = db.ensureHomeNote('我在这里。今天想说话，或者想一起做点什么，都可以来找我。');
 const workspace = new WorkspaceService(workspaceRoot);
 await workspace.init();
-const memory = new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT || 'http://127.0.0.1:18001/mcp');
+const ombre = new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT || 'http://127.0.0.1:18001/mcp');
+const memory = new MemoryService(ombre,db);
 const codex = new CodexRuntime(process.env.CODEX_APP_SERVER_ENDPOINT || 'ws://127.0.0.1:8765');
 const require = createRequire(import.meta.url);
 const { CyberbossAdapter } = require(join(appRoot, 'soren-core', 'cyberboss-adapter.cjs')) as { CyberbossAdapter: new (options: any) => any };
@@ -55,7 +57,6 @@ function route(pathname:string, pattern:RegExp) { return pathname.match(pattern)
 function cleanName(value:unknown, fallback='未命名') { return String(value || '').trim().slice(0,80) || fallback; }
 function validThinking(value:unknown): ThinkingMode { return value === 'off' || value === 'always' ? value : 'auto'; }
 function validDepth(value:unknown): ThinkingDepth { return value === 'deep' ? 'deep' : 'quick'; }
-function wantsPast(text:string) { return /(之前|上次|过去|还记得|曾经|以前|last time|remember when|previous)/i.test(text); }
 function wantsHold(text:string) { return /(记住|帮我记下|记一下|以后要记得|remember this|save this to memory)/i.test(text); }
 function complexTask(text:string) { return text.length > 500 || /(分析|架构|调试|debug|重构|长文|方案|比较|为什么|review|implement)/i.test(text); }
 async function personaText() { return (await Promise.all(Object.keys(personaDefaults).map(async name => readFile(join(personaRoot,name),'utf8')))).join('\n\n'); }
@@ -100,7 +101,7 @@ const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url||'/',`http://${req.headers.host}`); const path=url.pathname;
   try {
     if(req.method==='GET'&&path==='/api/health') return json(res,200,{ok:true,name:'soren-core',version:2});
-    if(req.method==='GET'&&path==='/api/bootstrap') return json(res,200,{core:{connected:true,version:2},services:{codex:await probe('http://127.0.0.1:8765/readyz'),ombre:await memory.client.health(),cyberboss:{configured:true,connected:true,mode:'soren-channel'}}});
+    if(req.method==='GET'&&path==='/api/bootstrap') return json(res,200,{core:{connected:true,version:2},services:{codex:await probe('http://127.0.0.1:8765/readyz'),ombre:await memory.status(),cyberboss:{configured:true,connected:true,mode:'soren-channel'}}});
     if(req.method==='GET'&&path==='/api/models') return json(res,200,{models:await codex.models()});
     if(req.method==='GET'&&path==='/api/home')return json(res,200,{note:db.homeNote()||homeNote,weather:await homeWeather(),today:homeToday(),moments:{unreadCount:Math.max(0,Number(db.setting('momentsUnreadCount',0))||0),available:false}});
     if(req.method==='PUT'&&path==='/api/home/note'){const input=await body(req),content=String(input.content||'').trim();if(!content)return json(res,400,{message:'Home Note 不能为空'});return json(res,200,{note:db.setHomeNote(content.slice(0,2000))});}
@@ -111,7 +112,7 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET'&&path==='/api/timeline')return json(res,200,{events:cyberboss.listTimeline()});
 
     if(req.method==='GET'&&path==='/api/conversations') return json(res,200,{conversations:db.conversations(url.searchParams.get('q')||'',url.searchParams.get('archived')==='1')});
-    if(req.method==='POST'&&path==='/api/conversations') { const input=await body(req); const context=await memory.breath().catch(()=> ''); return json(res,201,{conversation:db.createConversation(cleanName(input.title,'新对话'),context)}); }
+    if(req.method==='POST'&&path==='/api/conversations') { const input=await body(req); return json(res,201,{conversation:db.createConversation(cleanName(input.title,'新对话'))}); }
     let match=route(path,/^\/api\/conversations\/([^/]+)$/);
     if(match&&req.method==='GET'){const conversation=db.conversationById(match[1]);if(!conversation)return json(res,404,{message:'会话不存在'});return json(res,200,{conversation,messages:db.messages(match[1])});}
     if(match&&req.method==='PATCH'){const input=await body(req);return json(res,200,{conversation:db.updateConversation(match[1],input)});}
@@ -129,16 +130,16 @@ const server=http.createServer(async(req,res)=>{
       const send=sse(res);const mode=validThinking(input.thinkingMode||conversation.thinkingMode),depth=validDepth(input.thinkingDepth||conversation.thinkingDepth);
       if(mode==='always'||(mode==='auto'&&complexTask(message)))send({type:'thinking.summary',conversationId,turnId,text:complexTask(message)?'我会先梳理目标和约束，再检查结果是否可用。':'我会快速整理关键信息后回答。'});
       try {
-        let memoryContext=conversation.memoryContext;
-        if(wantsPast(message))memoryContext=await memory.search(message).catch(()=>memoryContext);
-        if(wantsHold(message)){await memory.hold(message,{title:message.slice(0,40),domain:'用户明确记忆',importance:7}).catch(()=>{});}
+        const recalled=await memory.recall({message,conversationId,projectId:conversation.projectId});
+        if(wantsHold(message)){await memory.remember({content:message,title:message.slice(0,40),scope:conversation.projectId?'project':'long_term',projectId:conversation.projectId,importance:7,sourceType:'chat',sourceId:conversationId,provenance:`Chat ${conversationId}`});}
         const project=conversation.projectId?db.project(conversation.projectId):null;
         const cwd=project?workspace.projectDir(project.id):workspaceRoot;
         let threadId=conversation.codexThreadId;
         if(!threadId){threadId=await codex.createThread(cwd,model);db.updateConversation(conversationId,{codexThreadId:threadId});}
         const before=project?await workspace.changedPaths(project.id):[];
         const textAttachments=await Promise.all(attachments.filter(a=>a.mime.startsWith('text/')||/\.(md|txt|json|csv)$/i.test(a.name)).map(async a=>`附件 ${a.name}：\n${(await readFile(a.absolutePath,'utf8')).slice(0,200000)}`));
-        const context=[await personaText(),memoryContext?`Ombre Brain 相关记忆：\n${memoryContext}`:'',project?`当前 Workspace 项目：${project.name}。只在该项目目录内操作文件。`:'',...textAttachments].filter(Boolean).join('\n\n');
+        const recentMessages=db.messages(conversationId).filter(item=>item.id!==userMessage.id);
+        const context=[buildTurnContext({identity:await personaText(),retrievedMemory:recalled.content,recentMessages,projectName:project?.name,runtimeState:recalled.degraded?'Ombre Brain 离线，当前使用本地记忆索引。':'Ombre Brain 已连接。'}),...textAttachments].filter(Boolean).join('\n\n');
         let reply='';
         const result=await codex.run({threadId,text:`${context}\n\n用户消息：${message}`,model,effort:depth==='deep'?'high':'low',cwd,attachments:attachments.filter(a=>a.mime.startsWith('image/')).map(a=>({absolutePath:a.absolutePath})),onTurnStarted:(codexTurnId)=>activeTurns.set(turnId,{threadId,codexTurnId}),onEvent:event=>{
           if(event.type==='delta'){reply+=event.text;send({type:'assistant.delta',conversationId,turnId,text:event.text});}
@@ -175,10 +176,14 @@ const server=http.createServer(async(req,res)=>{
     match=route(path,/^\/api\/projects\/([^/]+)\/diff$/);if(match&&req.method==='GET')return json(res,200,{diff:await workspace.diff(match[1],url.searchParams.get('commit')||undefined)});
     match=route(path,/^\/api\/projects\/([^/]+)\/restore$/);if(match&&req.method==='POST'){const input=await body(req);return json(res,200,{commit:await workspace.restore(match[1],String(input.commit||''))});}
 
-    if(req.method==='POST'&&path==='/api/memory/breath')return json(res,200,{content:await memory.breath()});
-    if(req.method==='POST'&&path==='/api/memory/search'){const input=await body(req);return json(res,200,{content:await memory.search(String(input.query||''))});}
-    if(req.method==='POST'&&path==='/api/memory/hold'){const input=await body(req);return json(res,200,{content:await memory.hold(String(input.content||''),input)});}
-    if(req.method==='GET'&&path==='/api/mcp'){const tools:any=await memory.tools().catch(()=>({tools:[]}));return json(res,200,{servers:[{id:'ombre',name:'Ombre Brain',status:await memory.client.health(),tools:tools?.tools||tools?.result?.tools||[]}],permissions:db.permissions(),audit:db.audits()});}
+    if(req.method==='POST'&&path==='/api/memory/breath'){const result=await memory.surface();return json(res,200,result);}
+    if(req.method==='POST'&&path==='/api/memory/search'){const input=await body(req),result=await memory.recall({message:String(input.query||''),conversationId:'memory-ui',projectId:null});return json(res,200,result);}
+    if(req.method==='POST'&&path==='/api/memory/hold'){const input=await body(req),result=await memory.remember({content:String(input.content||''),title:String(input.title||''),scope:input.scope||'long_term',projectId:input.projectId||null,importance:Number(input.importance)||6,pinned:Boolean(input.pinned),sourceType:'manual',provenance:'Memory UI'});return json(res,200,{content:result.degraded?'已保存在本地，Ombre 恢复后可同步。':'已写入共享记忆。',...result});}
+    if(req.method==='GET'&&path==='/api/memories')return json(res,200,{records:memory.list(url.searchParams.get('q')||''),status:await memory.status()});
+    match=route(path,/^\/api\/memories\/([^/]+)$/);if(match&&req.method==='PATCH'){const input=await body(req),record=await memory.update(match[1],input);if(!record)return json(res,404,{message:'记忆不存在'});return json(res,200,{record});}
+    if(req.method==='POST'&&path==='/api/memory/seed/preview'){const input=await body(req);return json(res,200,memory.previewSeed(input.seed));}
+    if(req.method==='POST'&&path==='/api/memory/seed/import'){const input=await body(req);return json(res,200,await memory.importSeed(input.seed));}
+    if(req.method==='GET'&&path==='/api/mcp'){const tools:any=await ombre.tools().catch(()=>({tools:[]}));return json(res,200,{servers:[{id:'ombre',name:'Ombre Brain',status:await memory.status(),tools:tools?.tools||tools?.result?.tools||[]}],permissions:db.permissions(),audit:db.audits()});}
     if(req.method==='PUT'&&path==='/api/mcp/permissions'){const input=await body(req);const item=input as ToolPermission;if(!['always_allow','ask_each_time','disabled'].includes(item.permission))return json(res,400,{message:'无效权限'});db.setPermission(item);db.audit(item.server,item.tool,'permission_changed',item.permission);return json(res,200,{permission:item});}
     if(req.method==='GET'&&path==='/api/settings')return json(res,200,{settings:db.settings(),persona:Object.fromEntries(await Promise.all(Object.keys(personaDefaults).map(async name=>[name,await readFile(join(personaRoot,name),'utf8')])))});
     if(req.method==='PUT'&&path==='/api/settings'){const input=await body(req);for(const [key,value]of Object.entries(input.settings||{}))db.setSetting(key,value);for(const [name,content]of Object.entries(input.persona||{})){if(!(name in personaDefaults))continue;await writeFile(join(personaRoot,name),String(content),'utf8');}return json(res,200,{saved:true});}

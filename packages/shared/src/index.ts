@@ -95,6 +95,38 @@ export interface HomeSnapshot {
   moments: { unreadCount: number; available: boolean };
 }
 
+export type MemoryScope = 'core' | 'long_term' | 'project' | 'temporary';
+export type MemorySyncStatus = 'pending' | 'synced' | 'failed';
+
+export interface MemoryRecord {
+  id: string;
+  fingerprint: string;
+  title: string;
+  content: string;
+  scope: MemoryScope;
+  projectId: string | null;
+  importance: number;
+  pinned: boolean;
+  sourceType: 'chat' | 'manual' | 'seed' | 'system';
+  sourceId: string | null;
+  provenance: string;
+  remoteId: string | null;
+  syncStatus: MemorySyncStatus;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemorySeedItem {
+  title?: string;
+  content: string;
+  scope?: MemoryScope;
+  projectId?: string | null;
+  importance?: number;
+  pinned?: boolean;
+  provenance?: string;
+}
+
 export type TurnEvent =
   | { type: 'assistant.delta'; conversationId: string; turnId: string; text: string }
   | { type: 'thinking.summary'; conversationId: string; turnId: string; text: string }
