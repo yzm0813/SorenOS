@@ -1,0 +1,13 @@
+node_modules/
+.pnpm-store/
+.sites-runtime/
+apps/*/dist/
+*.log
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+data/

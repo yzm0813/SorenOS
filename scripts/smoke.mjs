@@ -1,0 +1,21 @@
+const base = process.env.SOREN_CORE_URL || 'http://127.0.0.1:8787';
+const request = async (path, options = {}) => {
+  const response = await fetch(base + path, { ...options, headers: { 'content-type': 'application/json' } });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`${response.status} ${path}: ${text}`);
+  return text ? JSON.parse(text) : {};
+};
+const health = await request('/api/health');
+if (!health.ok || health.version !== 2) throw new Error('Core health check failed');
+const { conversation } = await request('/api/conversations', { method: 'POST', body: JSON.stringify({ title: '联调会话' }) });
+const detail = await request(`/api/conversations/${conversation.id}`);
+if (detail.conversation.title !== '联调会话') throw new Error('Conversation persistence failed');
+const { project } = await request('/api/projects', { method: 'POST', body: JSON.stringify({ name: '联调网页', type: 'web' }) });
+await request(`/api/projects/${project.id}/file`, { method: 'PUT', body: JSON.stringify({ path: 'index.html', content: '<!doctype html><h1>Soren preview</h1><script>console.log("ready")</script>' }) });
+const { commit } = await request(`/api/projects/${project.id}/commit`, { method: 'POST', body: JSON.stringify({ message: 'Update preview' }) });
+if (!commit) throw new Error('Git commit failed');
+const { history } = await request(`/api/projects/${project.id}/history`);
+if (history.length < 2) throw new Error('Git history failed');
+const traversal = await fetch(`${base}/api/projects/${project.id}/file?path=..%2Fsecret.txt`);
+if (traversal.status !== 500) throw new Error('Traversal protection failed');
+console.log(JSON.stringify({ ok: true, conversationId: conversation.id, projectId: project.id, versions: history.length }));
