@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { Conversation, ChatMessage, ToolPermission, WorkspaceProject } from '@soren/shared';
+import type { Conversation, ChatMessage, HomeNote, ToolPermission, WorkspaceProject } from '@soren/shared';
 import { applyMigrations } from './migrations.js';
 
 const now = () => new Date().toISOString();
@@ -57,7 +57,11 @@ export class SorenDatabase {
   project(id: string): any { return this.db.prepare('SELECT * FROM projects WHERE id=?').get(id); }
   touchProject(id: string) { this.db.prepare('UPDATE projects SET updated_at=? WHERE id=?').run(now(), id); }
   settings() { return Object.fromEntries((this.db.prepare('SELECT key,value FROM settings').all() as any[]).map(row => [row.key, JSON.parse(row.value)])); }
+  setting<T>(key: string, fallback: T): T { const row=this.db.prepare('SELECT value FROM settings WHERE key=?').get(key) as any;return row?JSON.parse(row.value):fallback; }
   setSetting(key: string, value: unknown) { this.db.prepare('INSERT INTO settings VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at').run(key,JSON.stringify(value),now()); }
+  homeNote(): HomeNote | null { const row=this.db.prepare('SELECT * FROM home_notes WHERE archived_at IS NULL ORDER BY updated_at DESC LIMIT 1').get() as any;return row?{id:row.id,content:row.content,createdAt:row.created_at,updatedAt:row.updated_at}:null; }
+  ensureHomeNote(content: string): HomeNote { return this.homeNote()||this.setHomeNote(content); }
+  setHomeNote(content: string): HomeNote { const at=now(),id=crypto.randomUUID();this.db.transaction(()=>{this.db.prepare('UPDATE home_notes SET archived_at=? WHERE archived_at IS NULL').run(at);this.db.prepare('INSERT INTO home_notes (id,content,created_at,updated_at) VALUES (?,?,?,?)').run(id,content,at,at);})();return this.homeNote()!; }
   permissions(): ToolPermission[] { return this.db.prepare('SELECT server,tool,permission,risk FROM tool_permissions ORDER BY server,tool').all() as ToolPermission[]; }
   setPermission(item: ToolPermission) { this.db.prepare('INSERT INTO tool_permissions VALUES (?,?,?,?) ON CONFLICT(server,tool) DO UPDATE SET permission=excluded.permission,risk=excluded.risk').run(item.server,item.tool,item.permission,item.risk); }
   audit(server:string,tool:string,outcome:string,detail='') { this.db.prepare('INSERT INTO audit_logs VALUES (?,?,?,?,?,?)').run(crypto.randomUUID(),server,tool,outcome,detail.slice(0,500),now()); }

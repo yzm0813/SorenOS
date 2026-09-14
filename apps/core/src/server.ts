@@ -7,8 +7,9 @@ import { CodexRuntime } from '@soren/runtime-codex';
 import { WorkspaceService, slugifyProject } from '@soren/workspace';
 import { OmbreMemory } from '@soren/memory';
 import { McpHttpClient } from '@soren/mcp-client';
-import type { ThinkingDepth, ThinkingMode, ToolPermission, TurnEvent } from '@soren/shared';
+import type { HomeTodayItem, ThinkingDepth, ThinkingMode, ToolPermission, TurnEvent, WeatherLocation, WeatherSnapshot } from '@soren/shared';
 import { SorenDatabase } from './db.js';
+import { emptyWeather, OpenMeteoWeatherProvider } from './weather.js';
 
 const appRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const dataRoot = resolve(appRoot, '..', 'data');
@@ -20,6 +21,7 @@ const webDist = join(appRoot, 'dist');
 await Promise.all([mkdir(dataRoot,{recursive:true}),mkdir(workspaceRoot,{recursive:true}),mkdir(personaRoot,{recursive:true}),mkdir(attachmentRoot,{recursive:true}),mkdir(logRoot,{recursive:true})]);
 
 const db = new SorenDatabase(join(dataRoot, 'soren.db'));
+const homeNote = db.ensureHomeNote('我在这里。今天想说话，或者想一起做点什么，都可以来找我。');
 const workspace = new WorkspaceService(workspaceRoot);
 await workspace.init();
 const memory = new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT || 'http://127.0.0.1:18001/mcp');
@@ -31,6 +33,8 @@ const host = process.env.SOREN_HOST || '127.0.0.1';
 const port = Number(process.env.SOREN_PORT || 8787);
 const allowedOrigin = process.env.SOREN_WEB_ORIGIN || 'http://127.0.0.1:5173';
 const activeTurns = new Map<string, { threadId: string; codexTurnId: string }>();
+const weatherProvider = new OpenMeteoWeatherProvider();
+const weatherCache = new Map<string,{expires:number,value:WeatherSnapshot}>();
 const personaDefaults: Record<string,string> = {
   'core.md': '# Core\n\n你是 Soren，运行在用户自己的私人聊天软件中，是长期、可靠、自然的私人伴侣。',
   'language-style.md': '# Language style\n\n直接、清楚、自然；根据用户的语言和语气回应，不堆砌套话。',
@@ -70,6 +74,20 @@ async function saveAttachments(items:any[], messageId:string) {
   return saved;
 }
 function conversationRow(row:any) { return { id:row.id,name:row.name,directory:row.directory,type:row.type,previewEntry:row.preview_entry,createdAt:row.created_at,updatedAt:row.updated_at }; }
+async function homeWeather() {
+  const location=db.setting<WeatherLocation|null>('weatherLocation',null);if(!location)return emptyWeather('unconfigured');
+  const key=`${location.latitude},${location.longitude}`,cached=weatherCache.get(key);if(cached&&cached.expires>Date.now())return cached.value;
+  try{const value=await weatherProvider.current(location);weatherCache.set(key,{expires:Date.now()+10*60*1000,value});return value;}catch{return emptyWeather('unavailable',location);}
+}
+function homeToday():HomeTodayItem[]{
+  const items:HomeTodayItem[]=[];const conversation=db.conversations()[0];const project=db.projectRows()[0];
+  if(conversation)items.push({type:'chat',id:conversation.id,title:conversation.title,detail:'最近的对话',occurredAt:conversation.updatedAt});
+  if(project)items.push({type:'workspace',id:project.id,title:project.name,detail:'最近的 Workspace 项目',occurredAt:project.updated_at});
+  const reminder=(cyberboss.listReminders()||[]).find((item:any)=>!['done','completed','dismissed'].includes(String(item.status||'').toLowerCase()));
+  if(reminder)items.push({type:'reminder',id:String(reminder.id||'reminder'),title:String(reminder.title||reminder.text||'今天的提醒'),detail:String(reminder.detail||reminder.dueAt||reminder.due_at||'Cyberboss 提醒'),occurredAt:String(reminder.updatedAt||reminder.createdAt||new Date().toISOString())});
+  const event=(cyberboss.listTimeline()||[])[0];if(event)items.push({type:'timeline',id:String(event.id||'timeline'),title:String(event.title||'最近的事件'),detail:String(event.detail||''),occurredAt:String(event.createdAt||new Date().toISOString())});
+  return items.sort((a,b)=>Date.parse(b.occurredAt)-Date.parse(a.occurredAt)).slice(0,4);
+}
 
 async function serveStatic(req:IncomingMessage,res:ServerResponse) {
   const url=new URL(req.url||'/',`http://${req.headers.host}`); const requestPath=url.pathname==='/'?'index.html':decodeURIComponent(url.pathname.slice(1));
@@ -84,6 +102,9 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET'&&path==='/api/health') return json(res,200,{ok:true,name:'soren-core',version:2});
     if(req.method==='GET'&&path==='/api/bootstrap') return json(res,200,{core:{connected:true,version:2},services:{codex:await probe('http://127.0.0.1:8765/readyz'),ombre:await memory.client.health(),cyberboss:{configured:true,connected:true,mode:'soren-channel'}}});
     if(req.method==='GET'&&path==='/api/models') return json(res,200,{models:await codex.models()});
+    if(req.method==='GET'&&path==='/api/home')return json(res,200,{note:db.homeNote()||homeNote,weather:await homeWeather(),today:homeToday(),moments:{unreadCount:Math.max(0,Number(db.setting('momentsUnreadCount',0))||0),available:false}});
+    if(req.method==='PUT'&&path==='/api/home/note'){const input=await body(req),content=String(input.content||'').trim();if(!content)return json(res,400,{message:'Home Note 不能为空'});return json(res,200,{note:db.setHomeNote(content.slice(0,2000))});}
+    if(req.method==='GET'&&path==='/api/weather/locations'){const query=String(url.searchParams.get('q')||'').trim();if(query.length<2)return json(res,200,{locations:[]});try{return json(res,200,{locations:await weatherProvider.search(query)});}catch{return json(res,200,{locations:[]});}}
     if(req.method==='GET'&&path==='/api/reminders')return json(res,200,{reminders:cyberboss.listReminders()});
     if(req.method==='POST'&&path==='/api/reminders'){const input=await body(req);return json(res,201,{reminder:cyberboss.createReminder(input)});}
     if(req.method==='GET'&&path==='/api/inbox')return json(res,200,{messages:cyberboss.listInbox()});

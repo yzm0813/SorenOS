@@ -50,6 +50,51 @@ export interface ToolPermission {
   risk: 'low' | 'medium' | 'high';
 }
 
+export interface WeatherLocation {
+  name: string;
+  admin1: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+  timezone: string;
+}
+
+export interface WeatherSnapshot {
+  status: 'ready' | 'unconfigured' | 'unavailable';
+  location: WeatherLocation | null;
+  temperature: number | null;
+  apparentTemperature: number | null;
+  minimum: number | null;
+  maximum: number | null;
+  precipitationProbability: number | null;
+  weatherCode: number | null;
+  label: string;
+  isDay: boolean | null;
+  observedAt: string | null;
+}
+
+export interface HomeNote {
+  id: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HomeTodayItem {
+  type: 'chat' | 'workspace' | 'reminder' | 'timeline';
+  id: string;
+  title: string;
+  detail: string;
+  occurredAt: string;
+}
+
+export interface HomeSnapshot {
+  note: HomeNote;
+  weather: WeatherSnapshot;
+  today: HomeTodayItem[];
+  moments: { unreadCount: number; available: boolean };
+}
+
 export type TurnEvent =
   | { type: 'assistant.delta'; conversationId: string; turnId: string; text: string }
   | { type: 'thinking.summary'; conversationId: string; turnId: string; text: string }

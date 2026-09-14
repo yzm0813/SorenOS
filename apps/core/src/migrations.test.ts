@@ -43,11 +43,25 @@ test('adopts the legacy schema without losing existing rows', () => {
     const migrated = new SorenDatabase(file);
     assert.equal(migrated.db.pragma('user_version', { simple: true }), latestSchemaVersion);
     assert.equal(migrated.conversationById('kept-conversation')?.title, '保留的会话');
-    assert.deepEqual(migrated.db.prepare('SELECT version,name FROM schema_migrations').all(), [{ version: 1, name: 'baseline_schema' }]);
+    assert.deepEqual(migrated.db.prepare('SELECT version,name FROM schema_migrations ORDER BY version').all(), [{ version: 1, name: 'baseline_schema' },{version:2,name:'home_notes'}]);
     migrated.db.close();
 
     const reopened = new SorenDatabase(file);
     assert.equal(reopened.conversations().length, 1);
+    reopened.db.close();
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('keeps the current Home note across restarts', () => {
+  const { directory, file } = tempDatabase();
+  try {
+    const store = new SorenDatabase(file);
+    const note = store.setHomeNote('留在 Home 的话');
+    assert.equal(store.audits().length,0);
+    store.db.close();
+    const reopened = new SorenDatabase(file);
+    assert.equal(reopened.homeNote()?.id, note.id);
+    assert.equal(reopened.homeNote()?.content, '留在 Home 的话');
     reopened.db.close();
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

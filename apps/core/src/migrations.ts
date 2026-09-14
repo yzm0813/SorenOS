@@ -48,6 +48,20 @@ export const migrations: SchemaMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
     `,
   },
+  {
+    version: 2,
+    name: 'home_notes',
+    sql: `
+      CREATE TABLE IF NOT EXISTS home_notes (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        archived_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_home_notes_current ON home_notes(archived_at, updated_at DESC);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0;

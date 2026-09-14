@@ -3,6 +3,8 @@
 审查日期：2026-09-14  
 范围：仅审查、验证、行为不变的结构拆分与数据库迁移基线；未进入 Phase 1。
 
+> 这是 Phase 0 完成时的基线快照；Phase 1 已将数据库继续迁移到 v2，当前状态见 `phase-1-home.md`。
+
 ## 当前架构
 
 主链路：`React Web → Soren Core HTTP/SSE → Codex app-server → Workspace/Git`，Core 同时通过 MCP HTTP 调用 Ombre Brain，并复用 `soren-core/cyberboss-adapter.cjs` 读取 Cyberboss 的提醒、Inbox 与 Timeline 数据。
