@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import Database from 'better-sqlite3';
 import { SorenDatabase } from './db.js';
-import { latestSchemaVersion } from './migrations.js';
+import { latestSchemaVersion, migrations } from './migrations.js';
 
 function tempDatabase() {
   const directory = mkdtempSync(join(tmpdir(), 'soren-migration-'));
@@ -22,6 +22,8 @@ test('creates the current schema for a fresh database', () => {
     assert.ok(tables.includes('schema_migrations'));
     assert.ok(tables.includes('moments'));
     assert.ok(tables.includes('moment_comments'));
+    assert.ok(tables.includes('social_actors'));
+    assert.ok(tables.includes('social_events'));
     store.db.close();
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -45,7 +47,7 @@ test('adopts the legacy schema without losing existing rows', () => {
     const migrated = new SorenDatabase(file);
     assert.equal(migrated.db.pragma('user_version', { simple: true }), latestSchemaVersion);
     assert.equal(migrated.conversationById('kept-conversation')?.title, '保留的会话');
-    assert.deepEqual(migrated.db.prepare('SELECT version,name FROM schema_migrations ORDER BY version').all(), [{ version: 1, name: 'baseline_schema' },{version:2,name:'home_notes'},{version:3,name:'shared_memory_index'},{version:4,name:'moments_feed'}]);
+    assert.deepEqual(migrated.db.prepare('SELECT version,name FROM schema_migrations ORDER BY version').all(), [{ version: 1, name: 'baseline_schema' },{version:2,name:'home_notes'},{version:3,name:'shared_memory_index'},{version:4,name:'moments_feed'},{version:5,name:'social_life_engine'}]);
     migrated.db.close();
 
     const reopened = new SorenDatabase(file);
@@ -67,3 +69,5 @@ test('keeps the current Home note across restarts', () => {
     reopened.db.close();
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('upgrades Phase 3 Moments rows without changing their identity or timestamp',()=>{const{directory,file}=tempDatabase();try{const phase4=new Database(file);for(const migration of migrations.filter(item=>item.version<=4))phase4.exec(migration.sql);phase4.pragma('user_version = 4');phase4.prepare('INSERT INTO moments (id,author,content,location,world_context,read_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').run('kept-moment','soren','保留这条动态','','',null,'2026-09-15T12:00:00.000Z','2026-09-15T12:00:00.000Z');phase4.close();const migrated=new SorenDatabase(file),row=migrated.db.prepare('SELECT id,author_id,content,created_at FROM moments WHERE id=?').get('kept-moment') as any;assert.deepEqual(row,{id:'kept-moment',author_id:'soren',content:'保留这条动态',created_at:'2026-09-15T12:00:00.000Z'});assert.equal(migrated.db.pragma('user_version',{simple:true}),5);migrated.db.close();}finally{rmSync(directory,{recursive:true,force:true});}});

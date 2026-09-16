@@ -95,7 +95,20 @@ export interface HomeSnapshot {
   moments: { unreadCount: number; available: boolean };
 }
 
-export type MomentAuthor = 'user' | 'soren';
+export type MomentAuthor = 'user' | 'soren' | 'npc';
+export type SocialActorKind = MomentAuthor;
+
+export interface SocialActor {
+  id: string;
+  kind: SocialActorKind;
+  nickname: string;
+  avatar: string;
+  personality: string;
+  relationToSoren: string;
+  relationToUser: string;
+  memory: string[];
+  active: boolean;
+}
 
 export interface MomentMedia {
   id: string;
@@ -111,22 +124,47 @@ export interface MomentComment {
   id: string;
   momentId: string;
   author: MomentAuthor;
+  authorId: string;
+  actor: SocialActor;
   content: string;
   replyToCommentId: string | null;
+  createdAt: string;
+}
+
+export interface MomentLike {
+  id: string;
+  momentId: string;
+  actorId: string;
+  actor: SocialActor;
   createdAt: string;
 }
 
 export interface MomentPost {
   id: string;
   author: MomentAuthor;
+  authorId: string;
+  actor: SocialActor;
   content: string;
   location: string;
   worldContext: string;
+  imageDescription: string;
   readAt: string | null;
   createdAt: string;
   updatedAt: string;
   media: MomentMedia[];
+  likes: MomentLike[];
+  likedByUser: boolean;
   comments: MomentComment[];
+}
+
+export interface SocialLifeStatus {
+  enabled: boolean;
+  running: boolean;
+  nextEvaluationAt: string | null;
+  lastEvaluationAt: string | null;
+  lastOutcome: string;
+  generatedToday: number;
+  dailyLimit: number;
 }
 
 export type MemoryScope = 'core' | 'long_term' | 'project' | 'temporary';

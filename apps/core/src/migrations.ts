@@ -125,6 +125,67 @@ export const migrations: SchemaMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_moment_comments_post ON moment_comments(moment_id, created_at);
     `,
   },
+  {
+    version: 5,
+    name: 'social_life_engine',
+    sql: `
+      CREATE TABLE IF NOT EXISTS social_actors (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        nickname TEXT NOT NULL,
+        avatar TEXT NOT NULL,
+        personality TEXT NOT NULL,
+        relation_to_soren TEXT NOT NULL DEFAULT '',
+        relation_to_user TEXT NOT NULL DEFAULT '',
+        memory_json TEXT NOT NULL DEFAULT '[]',
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      ALTER TABLE moments ADD COLUMN author_id TEXT NOT NULL DEFAULT '';
+      ALTER TABLE moments ADD COLUMN image_description TEXT NOT NULL DEFAULT '';
+      ALTER TABLE moments ADD COLUMN motivation TEXT NOT NULL DEFAULT '';
+      ALTER TABLE moments ADD COLUMN source_event_id TEXT;
+      ALTER TABLE moments ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';
+      ALTER TABLE moments ADD COLUMN deleted_at TEXT;
+      ALTER TABLE moment_comments ADD COLUMN author_id TEXT NOT NULL DEFAULT '';
+      CREATE TABLE IF NOT EXISTS moment_likes (
+        id TEXT PRIMARY KEY,
+        moment_id TEXT NOT NULL REFERENCES moments(id) ON DELETE CASCADE,
+        actor_id TEXT NOT NULL REFERENCES social_actors(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        UNIQUE(moment_id, actor_id)
+      );
+      CREATE TABLE IF NOT EXISTS social_events (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        actor_id TEXT,
+        target_id TEXT,
+        summary TEXT NOT NULL,
+        importance INTEGER NOT NULL DEFAULT 5,
+        privacy TEXT NOT NULL DEFAULT 'private',
+        due_at TEXT,
+        consumed_at TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS social_actor_state (
+        actor_id TEXT PRIMARY KEY REFERENCES social_actors(id) ON DELETE CASCADE,
+        mood TEXT NOT NULL DEFAULT '平静',
+        energy INTEGER NOT NULL DEFAULT 60,
+        focus TEXT NOT NULL DEFAULT '',
+        current_activity TEXT NOT NULL DEFAULT '',
+        last_post_at TEXT,
+        last_interaction_at TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_social_events_pending ON social_events(consumed_at, due_at, importance DESC, created_at);
+      CREATE INDEX IF NOT EXISTS idx_moments_actor_created ON moments(author_id, deleted_at, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_moment_likes_post ON moment_likes(moment_id, created_at);
+      UPDATE moments SET author_id=CASE author WHEN 'soren' THEN 'soren' ELSE 'user' END WHERE author_id='';
+      UPDATE moment_comments SET author_id=CASE author WHEN 'soren' THEN 'soren' ELSE 'user' END WHERE author_id='';
+    `,
+  },
 ];
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0;
