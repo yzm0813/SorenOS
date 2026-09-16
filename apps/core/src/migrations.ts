@@ -265,6 +265,17 @@ export const migrations: SchemaMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_commitment_followups_created ON commitment_followups(commitment_id,created_at DESC);
     `,
   },
+  {
+    version: 8,
+    name: 'recurring_commitments',
+    sql: `
+      ALTER TABLE commitments ADD COLUMN recurrence TEXT NOT NULL DEFAULT 'none';
+      ALTER TABLE commitments ADD COLUMN recurrence_time TEXT;
+      ALTER TABLE commitments ADD COLUMN cycle_key TEXT;
+      ALTER TABLE commitments ADD COLUMN cycle_followup_count INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX IF NOT EXISTS idx_commitments_recurrence ON commitments(status,recurrence,cycle_key);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0;

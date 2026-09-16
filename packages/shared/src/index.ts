@@ -201,6 +201,7 @@ export interface NotificationRecord {
 
 export type CyberDaddyIntensity = 'gentle' | 'normal' | 'daddy';
 export type CommitmentStatus = 'active' | 'completed' | 'cancelled';
+export type CommitmentRecurrence = 'none' | 'daily';
 export type FollowUpAction = 'NO_ACTION' | 'REMIND' | 'FOLLOW_UP' | 'REDUCE_TASK' | 'POSTPONE' | 'CHECK_IN';
 
 export interface CyberDaddyDomain {
@@ -223,6 +224,10 @@ export interface Commitment {
   updatedAt: string;
   completedAt: string | null;
   sourceConversationId: string | null;
+  recurrence: CommitmentRecurrence;
+  recurrenceTime: string | null;
+  cycleKey: string | null;
+  cycleFollowUpCount: number;
   lastFollowUpAt: string | null;
   nextFollowUpAt: string | null;
   followUpCount: number;

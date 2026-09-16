@@ -4,9 +4,9 @@ CyberDaddy is a supervision capability of Soren. It does not introduce another c
 
 ## Data and controls
 
-Migration 7 adds `cyberdaddy_domains`, `commitments`, and `commitment_followups`. Six stable domains are installed disabled by default: sleep, study, career, fitness, projects, and habits. The user must enable the global switch and each domain before follow-ups are eligible.
+Migration 7 adds `cyberdaddy_domains`, `commitments`, and `commitment_followups`; migration 8 adds recurring commitment state. Six stable domains are installed disabled by default: sleep, study, career, fitness, projects, and habits. The user must enable the global switch and each domain before follow-ups are eligible.
 
-The operational UI lives in Timeline. It exposes the global switch, local pause, quiet hours, per-domain intensity, commitment creation, completion, cancellation, and follow-up history. The Settings global proactive pause also stops all CyberDaddy activity.
+The operational UI lives in Timeline. It exposes the global switch, local pause, quiet hours, per-domain intensity, one-time or daily commitment creation, completion, cancellation, and follow-up history. Daily commitments keep one identity, reset their follow-up cycle on each local calendar day, and do not replay every missed day after downtime. The Settings global proactive pause also stops all CyberDaddy activity.
 
 ## Pulse behavior
 
