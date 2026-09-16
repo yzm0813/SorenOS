@@ -24,6 +24,7 @@ function itemText(item: any) {
 export class CodexRuntime {
   private client: any;
   private ready = false;
+  private freshThreads = new Set<string>();
   constructor(private endpoint = 'ws://127.0.0.1:8765') { this.client = new CodexRpcClient({ endpoint }); }
 
   async initialize() {
@@ -44,6 +45,7 @@ export class CodexRuntime {
     const response = await this.client.startThread({ cwd, model });
     const threadId = id(response?.result?.thread?.id);
     if (!threadId) throw new Error('Codex 没有返回会话 ID');
+    this.freshThreads.add(threadId);
     return threadId;
   }
 
@@ -58,7 +60,8 @@ export class CodexRuntime {
     onEvent: (event: RuntimeEvent) => void;
   }) {
     await this.initialize();
-    await this.client.resumeThread({ threadId: options.threadId });
+    if (this.freshThreads.has(options.threadId)) this.freshThreads.delete(options.threadId);
+    else await this.client.resumeThread({ threadId: options.threadId });
     let expectedTurnId = '';
     let activeTurnId = '';
     let streamed = '';
