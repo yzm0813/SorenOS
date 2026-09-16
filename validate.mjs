@@ -11,12 +11,12 @@ const entryPath = resolve(fileURLToPath(new URL('./dist/', root)), entry.replace
 if (!existsSync(entryPath) || statSync(entryPath).size === 0) throw new Error(`Built JavaScript entry is missing: ${entry}`);
 
 const app = readFileSync(new URL('./apps/web/src/App.tsx', root), 'utf8');
-for (const feature of ['HomeView', 'ChatView', 'WorkspaceView', 'MemoryView', 'TimelineView', 'SettingsView']) {
+for (const feature of ['HomeView', 'ChatView', 'WorkspaceView', 'MemoryView', 'MomentsView', 'TimelineView', 'SettingsView']) {
   if (!app.includes(`<${feature}`)) throw new Error(`App shell does not mount ${feature}.`);
 }
 
 const server = readFileSync(new URL('./apps/core/src/server.ts', root), 'utf8');
-for (const route of ['/api/bootstrap', '/api/home', '/api/weather/locations', '/api/conversations', '/api/projects', '/api/memory/breath', '/api/memories', '/api/memory/seed/preview', '/api/mcp']) {
+for (const route of ['/api/bootstrap', '/api/home', '/api/weather/locations', '/api/conversations', '/api/projects', '/api/memory/breath', '/api/memories', '/api/memory/seed/preview', '/api/moments', '/api/moments/read', '/comments', '/api/mcp']) {
   if (!server.includes(route)) throw new Error(`Core route is missing: ${route}`);
 }
 

@@ -95,6 +95,40 @@ export interface HomeSnapshot {
   moments: { unreadCount: number; available: boolean };
 }
 
+export type MomentAuthor = 'user' | 'soren';
+
+export interface MomentMedia {
+  id: string;
+  momentId: string;
+  kind: 'image';
+  path: string;
+  mime: string;
+  size: number;
+  createdAt: string;
+}
+
+export interface MomentComment {
+  id: string;
+  momentId: string;
+  author: MomentAuthor;
+  content: string;
+  replyToCommentId: string | null;
+  createdAt: string;
+}
+
+export interface MomentPost {
+  id: string;
+  author: MomentAuthor;
+  content: string;
+  location: string;
+  worldContext: string;
+  readAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  media: MomentMedia[];
+  comments: MomentComment[];
+}
+
 export type MemoryScope = 'core' | 'long_term' | 'project' | 'temporary';
 export type MemorySyncStatus = 'pending' | 'synced' | 'failed';
 

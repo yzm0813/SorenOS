@@ -88,6 +88,43 @@ export const migrations: SchemaMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_records(project_id, archived, updated_at DESC);
     `,
   },
+  {
+    version: 4,
+    name: 'moments_feed',
+    sql: `
+      CREATE TABLE IF NOT EXISTS moments (
+        id TEXT PRIMARY KEY,
+        author TEXT NOT NULL,
+        content TEXT NOT NULL,
+        location TEXT NOT NULL DEFAULT '',
+        world_context TEXT NOT NULL DEFAULT '',
+        read_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS moment_media (
+        id TEXT PRIMARY KEY,
+        moment_id TEXT NOT NULL REFERENCES moments(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL DEFAULT 'image',
+        path TEXT NOT NULL,
+        mime TEXT NOT NULL,
+        size INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS moment_comments (
+        id TEXT PRIMARY KEY,
+        moment_id TEXT NOT NULL REFERENCES moments(id) ON DELETE CASCADE,
+        author TEXT NOT NULL,
+        content TEXT NOT NULL,
+        reply_to_comment_id TEXT REFERENCES moment_comments(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_moments_created ON moments(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_moments_unread ON moments(author, read_at, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_moment_media_post ON moment_media(moment_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_moment_comments_post ON moment_comments(moment_id, created_at);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0;

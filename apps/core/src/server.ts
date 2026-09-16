@@ -11,9 +11,10 @@ import { SorenDatabase } from './db.js';
 import { emptyWeather, OpenMeteoWeatherProvider } from './weather.js';
 import { MemoryService } from './memory-service.js';
 import { buildTurnContext } from './context.js';
+import { MomentsService } from './moments-service.js';
 
 const appRoot = fileURLToPath(new URL('../../../', import.meta.url));
-const dataRoot = resolve(appRoot, '..', 'data');
+const dataRoot = resolve(process.env.SOREN_DATA_ROOT || resolve(appRoot, '..', 'data'));
 const workspaceRoot = join(dataRoot, 'workspace');
 const personaRoot = join(dataRoot, 'persona');
 const attachmentRoot = join(dataRoot, 'attachments');
@@ -27,6 +28,7 @@ const workspace = new WorkspaceService(workspaceRoot);
 await workspace.init();
 const ombre = new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT || 'http://127.0.0.1:18001/mcp');
 const memory = new MemoryService(ombre,db);
+const moments = new MomentsService(db);
 const codex = new CodexRuntime(process.env.CODEX_APP_SERVER_ENDPOINT || 'ws://127.0.0.1:8765');
 const require = createRequire(import.meta.url);
 const { CyberbossAdapter } = require(join(appRoot, 'soren-core', 'cyberboss-adapter.cjs')) as { CyberbossAdapter: new (options: any) => any };
@@ -103,13 +105,18 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET'&&path==='/api/health') return json(res,200,{ok:true,name:'soren-core',version:2});
     if(req.method==='GET'&&path==='/api/bootstrap') return json(res,200,{core:{connected:true,version:2},services:{codex:await probe('http://127.0.0.1:8765/readyz'),ombre:await memory.status(),cyberboss:{configured:true,connected:true,mode:'soren-channel'}}});
     if(req.method==='GET'&&path==='/api/models') return json(res,200,{models:await codex.models()});
-    if(req.method==='GET'&&path==='/api/home')return json(res,200,{note:db.homeNote()||homeNote,weather:await homeWeather(),today:homeToday(),moments:{unreadCount:Math.max(0,Number(db.setting('momentsUnreadCount',0))||0),available:false}});
+    if(req.method==='GET'&&path==='/api/home')return json(res,200,{note:db.homeNote()||homeNote,weather:await homeWeather(),today:homeToday(),moments:{unreadCount:db.unreadMoments(),available:true}});
     if(req.method==='PUT'&&path==='/api/home/note'){const input=await body(req),content=String(input.content||'').trim();if(!content)return json(res,400,{message:'Home Note 不能为空'});return json(res,200,{note:db.setHomeNote(content.slice(0,2000))});}
     if(req.method==='GET'&&path==='/api/weather/locations'){const query=String(url.searchParams.get('q')||'').trim();if(query.length<2)return json(res,200,{locations:[]});try{return json(res,200,{locations:await weatherProvider.search(query)});}catch{return json(res,200,{locations:[]});}}
     if(req.method==='GET'&&path==='/api/reminders')return json(res,200,{reminders:cyberboss.listReminders()});
     if(req.method==='POST'&&path==='/api/reminders'){const input=await body(req);return json(res,201,{reminder:cyberboss.createReminder(input)});}
     if(req.method==='GET'&&path==='/api/inbox')return json(res,200,{messages:cyberboss.listInbox()});
     if(req.method==='GET'&&path==='/api/timeline')return json(res,200,{events:cyberboss.listTimeline()});
+    if(req.method==='GET'&&path==='/api/moments')return json(res,200,moments.feed(Number(url.searchParams.get('limit')||50)));
+    if(req.method==='POST'&&path==='/api/moments'){const input=await body(req),content=String(input.content||'').trim();if(!content)return json(res,400,{message:'动态内容不能为空'});const moment=input.author==='soren'?moments.publishSoren(input):moments.publishUser(input);return json(res,201,{moment,unreadCount:db.unreadMoments()});}
+    if(req.method==='POST'&&path==='/api/moments/read'){const input=await body(req);return json(res,200,moments.read(input.ids));}
+    const momentCommentMatch=route(path,/^\/api\/moments\/([^/]+)\/comments$/);
+    if(momentCommentMatch&&req.method==='POST'){const input=await body(req),content=String(input.content||'').trim();if(!content)return json(res,400,{message:'评论不能为空'});try{return json(res,201,{comment:moments.comment(momentCommentMatch[1],input)});}catch(error:any){return json(res,404,{message:error?.message||'动态不存在'});}}
 
     if(req.method==='GET'&&path==='/api/conversations') return json(res,200,{conversations:db.conversations(url.searchParams.get('q')||'',url.searchParams.get('archived')==='1')});
     if(req.method==='POST'&&path==='/api/conversations') { const input=await body(req); return json(res,201,{conversation:db.createConversation(cleanName(input.title,'新对话'))}); }
