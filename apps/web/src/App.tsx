@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Brain, Clock3, Folder, Heart, Home, MessageCircle, Settings, UserRound } from 'lucide-react';
-import type { Conversation, HomeTodayItem, WorkspaceProject } from '@soren/shared';
+import type { Conversation, HomeTodayItem, NotificationRecord, WorkspaceProject } from '@soren/shared';
 import { api } from './api';
 import { ChatView } from './features/chat/ChatView';
 import { HomeView } from './features/home/HomeView';
@@ -16,6 +16,7 @@ const nav=[['home','Home',Home],['chat','Chat',MessageCircle],['workspace','Work
 export default function App(){
   const[view,setView]=useState<View>('home');const[online,setOnline]=useState(false);const[currentConversation,setCurrentConversation]=useState<Conversation|null>(null);const[openProjectId,setOpenProjectId]=useState<string|null>(null);const[chatDraft,setChatDraft]=useState(''),[momentsUnread,setMomentsUnread]=useState(0);
   useEffect(()=>{api('/api/bootstrap').then(()=>setOnline(true)).catch(()=>setOnline(false));const unread=()=>api<{unreadCount:number}>('/api/moments?limit=1').then(data=>setMomentsUnread(data.unreadCount)).catch(()=>{});unread();const timer=window.setInterval(unread,60_000);return()=>clearInterval(timer);},[]);
+  useEffect(()=>{const deliver=async()=>{if(!('Notification'in window)||Notification.permission!=='granted')return;try{const[{settings},{notifications}]=await Promise.all([api<{settings:Record<string,unknown>}>('/api/settings'),api<{notifications:NotificationRecord[]}>('/api/notifications?channel=system&status=pending&limit=10')]);if(!settings.systemNotificationsEnabled)return;for(const item of notifications){const notice=new Notification(item.title||'Soren',{body:item.body,tag:item.dedupeKey});notice.onclick=()=>{window.focus();setView('chat');notice.close();};await api(`/api/notifications/${item.id}/delivered`,{method:'POST'});}}catch{}};deliver();const timer=window.setInterval(deliver,30_000);return()=>clearInterval(timer);},[]);
   const askProject=async(project:WorkspaceProject)=>{let conversation=currentConversation;if(!conversation){conversation=(await api<{conversation:Conversation}>('/api/conversations',{method:'POST',body:JSON.stringify({title:project.name})})).conversation;}conversation=(await api<{conversation:Conversation}>(`/api/conversations/${conversation.id}`,{method:'PATCH',body:JSON.stringify({projectId:project.id})})).conversation;setCurrentConversation(conversation);setView('chat');};
   const openHomeItem=async(item:HomeTodayItem)=>{if(item.type==='chat'){const data=await api<{conversation:Conversation}>(`/api/conversations/${item.id}`);setCurrentConversation(data.conversation);setView('chat');}else if(item.type==='workspace'){setOpenProjectId(item.id);setView('workspace');}else setView('timeline');};
   const replyToNote=(content:string)=>{setChatDraft(`回应你留在 Home 的话：\n\n> ${content.replace(/\n/g,'\n> ')}\n\n`);setView('chat');};

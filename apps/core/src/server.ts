@@ -14,6 +14,7 @@ import { buildTurnContext } from './context.js';
 import { MomentsService } from './moments-service.js';
 import { CodexSocialGenerator } from './social-generator.js';
 import { SocialLifeEngine } from './social-life.js';
+import { EventService } from './event-service.js';
 
 const appRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const dataRoot = resolve(process.env.SOREN_DATA_ROOT || resolve(appRoot, '..', 'data'));
@@ -31,7 +32,8 @@ const workspace = new WorkspaceService(workspaceRoot);
 await workspace.init();
 const ombre = new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT || 'http://127.0.0.1:18001/mcp');
 const memory = new MemoryService(ombre,db);
-const moments = new MomentsService(db);
+const events = new EventService(db);
+const moments = new MomentsService(db,post=>events.emit({type:'moment.created',sourceType:'moment',sourceId:post.id,title:`${post.actor.nickname} 的朋友圈`,body:post.content||post.imageDescription,payload:{authorId:post.authorId}}));
 const codex = new CodexRuntime(process.env.CODEX_APP_SERVER_ENDPOINT || 'ws://127.0.0.1:8765');
 const socialLife = new SocialLifeEngine(db,moments,new CodexSocialGenerator(codex,db,momentsRuntimeRoot));
 socialLife.start();
@@ -113,10 +115,10 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET'&&path==='/api/bootstrap') return json(res,200,{core:{connected:true,version:2},services:{codex:await probe('http://127.0.0.1:8765/readyz'),ombre:await memory.status(),cyberboss:{configured:true,connected:true,mode:'soren-channel'}}});
     if(req.method==='GET'&&path==='/api/models') return json(res,200,{models:await codex.models()});
     if(req.method==='GET'&&path==='/api/home')return json(res,200,{note:db.homeNote()||homeNote,weather:await homeWeather(),today:homeToday(),moments:{unreadCount:moments.social.unreadCount(),available:true}});
-    if(req.method==='PUT'&&path==='/api/home/note'){const input=await body(req),content=String(input.content||'').trim();if(!content)return json(res,400,{message:'Home Note 不能为空'});return json(res,200,{note:db.setHomeNote(content.slice(0,2000))});}
+    if(req.method==='PUT'&&path==='/api/home/note'){const input=await body(req),content=String(input.content||'').trim();if(!content)return json(res,400,{message:'Home Note 不能为空'});const note=db.setHomeNote(content.slice(0,2000));events.emit({type:'home_note.created',sourceType:'home_note',sourceId:note.id,title:'Soren 留给你',body:note.content});return json(res,200,{note});}
     if(req.method==='GET'&&path==='/api/weather/locations'){const query=String(url.searchParams.get('q')||'').trim();if(query.length<2)return json(res,200,{locations:[]});try{return json(res,200,{locations:await weatherProvider.search(query)});}catch{return json(res,200,{locations:[]});}}
     if(req.method==='GET'&&path==='/api/reminders')return json(res,200,{reminders:cyberboss.listReminders()});
-    if(req.method==='POST'&&path==='/api/reminders'){const input=await body(req);return json(res,201,{reminder:cyberboss.createReminder(input)});}
+    if(req.method==='POST'&&path==='/api/reminders'){const input=await body(req),reminder=cyberboss.createReminder(input),important=Boolean(input.important)||Number(input.importance)>=8,event=events.emit({type:important?'reminder.important':'reminder.created',sourceType:'reminder',sourceId:String(reminder.id||crypto.randomUUID()),title:String(reminder.title||input.title||'提醒'),body:String(reminder.detail||reminder.text||input.detail||input.text||''),payload:{important}});return json(res,201,{reminder,event});}
     if(req.method==='GET'&&path==='/api/inbox')return json(res,200,{messages:cyberboss.listInbox()});
     if(req.method==='GET'&&path==='/api/timeline')return json(res,200,{events:cyberboss.listTimeline()});
     if(req.method==='GET'&&path==='/api/moments')return json(res,200,moments.feed(Number(url.searchParams.get('limit')||50),String(url.searchParams.get('actorId')||'')));
@@ -208,6 +210,10 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='POST'&&path==='/api/memory/seed/import'){const input=await body(req);return json(res,200,await memory.importSeed(input.seed));}
     if(req.method==='GET'&&path==='/api/mcp'){const tools:any=await ombre.tools().catch(()=>({tools:[]}));return json(res,200,{servers:[{id:'ombre',name:'Ombre Brain',status:await memory.status(),tools:tools?.tools||tools?.result?.tools||[]}],permissions:db.permissions(),audit:db.audits()});}
     if(req.method==='PUT'&&path==='/api/mcp/permissions'){const input=await body(req);const item=input as ToolPermission;if(!['always_allow','ask_each_time','disabled'].includes(item.permission))return json(res,400,{message:'无效权限'});db.setPermission(item);db.audit(item.server,item.tool,'permission_changed',item.permission);return json(res,200,{permission:item});}
+    if(req.method==='GET'&&path==='/api/events')return json(res,200,{events:events.events(Number(url.searchParams.get('limit')||50))});
+    if(req.method==='GET'&&path==='/api/notifications')return json(res,200,{notifications:events.notifications({channel:url.searchParams.get('channel')||'',status:url.searchParams.get('status')||'',limit:Number(url.searchParams.get('limit')||50)})});
+    match=route(path,/^\/api\/notifications\/([^/]+)\/(delivered|read)$/);if(match&&req.method==='POST'){const notification=match[2]==='read'?events.markRead(match[1]):events.markDelivered(match[1]);if(!notification)return json(res,404,{message:'通知不存在'});return json(res,200,{notification});}
+    if(req.method==='POST'&&path==='/api/proactive/messages'){if(db.setting('proactivePaused',false))return json(res,409,{message:'主动功能已暂停'});const input=await body(req),content=String(input.content||'').trim();if(!content)return json(res,400,{message:'主动消息不能为空'});const sourceId=String(input.sourceId||crypto.randomUUID()),result=events.emit({type:'assistant.proactive_message',sourceType:'soren',sourceId,title:String(input.title||'Soren'),body:content.slice(0,4000),dedupeKey:input.dedupeKey?String(input.dedupeKey):undefined,conversationId:input.conversationId?String(input.conversationId):null,payload:{reason:String(input.reason||'')}}),chat=result.notifications.find(item=>item.deliveryChannel==='chat');return json(res,201,{...result,conversation:chat?.conversationId?db.conversationById(chat.conversationId):null});}
     if(req.method==='GET'&&path==='/api/settings')return json(res,200,{settings:db.settings(),persona:Object.fromEntries(await Promise.all(Object.keys(personaDefaults).map(async name=>[name,await readFile(join(personaRoot,name),'utf8')])))});
     if(req.method==='PUT'&&path==='/api/settings'){const input=await body(req);for(const [key,value]of Object.entries(input.settings||{}))db.setSetting(key,value);for(const [name,content]of Object.entries(input.persona||{})){if(!(name in personaDefaults))continue;await writeFile(join(personaRoot,name),String(content),'utf8');}return json(res,200,{saved:true});}
     if(path.startsWith('/api/'))return json(res,404,{message:'Unknown API route'});

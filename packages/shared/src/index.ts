@@ -167,6 +167,38 @@ export interface SocialLifeStatus {
   dailyLimit: number;
 }
 
+export type DeliveryChannel = 'in_app' | 'chat' | 'system' | 'mobile_future';
+export type NotificationStatus = 'pending' | 'delivered' | 'read' | 'suppressed';
+
+export interface DomainEvent {
+  id: string;
+  type: string;
+  sourceType: string;
+  sourceId: string;
+  title: string;
+  body: string;
+  payload: Record<string,unknown>;
+  dedupeKey: string;
+  occurredAt: string;
+}
+
+export interface NotificationRecord {
+  id: string;
+  eventId: string;
+  type: string;
+  sourceType: string;
+  sourceId: string;
+  deliveryChannel: DeliveryChannel;
+  status: NotificationStatus;
+  title: string;
+  body: string;
+  conversationId: string | null;
+  createdAt: string;
+  deliveredAt: string | null;
+  readAt: string | null;
+  dedupeKey: string;
+}
+
 export type MemoryScope = 'core' | 'long_term' | 'project' | 'temporary';
 export type MemorySyncStatus = 'pending' | 'synced' | 'failed';
 

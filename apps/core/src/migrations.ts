@@ -186,6 +186,43 @@ export const migrations: SchemaMigration[] = [
       UPDATE moment_comments SET author_id=CASE author WHEN 'soren' THEN 'soren' ELSE 'user' END WHERE author_id='';
     `,
   },
+  {
+    version: 6,
+    name: 'event_notification_layer',
+    sql: `
+      CREATE TABLE IF NOT EXISTS domain_events (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT NOT NULL DEFAULT '',
+        title TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL DEFAULT '',
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        dedupe_key TEXT NOT NULL UNIQUE,
+        occurred_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL REFERENCES domain_events(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT NOT NULL DEFAULT '',
+        delivery_channel TEXT NOT NULL,
+        status TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL DEFAULT '',
+        conversation_id TEXT,
+        created_at TEXT NOT NULL,
+        delivered_at TEXT,
+        read_at TEXT,
+        dedupe_key TEXT NOT NULL,
+        UNIQUE(dedupe_key, delivery_channel)
+      );
+      CREATE INDEX IF NOT EXISTS idx_domain_events_occurred ON domain_events(occurred_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_notifications_delivery ON notifications(delivery_channel,status,created_at);
+      CREATE INDEX IF NOT EXISTS idx_notifications_event ON notifications(event_id);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0;
