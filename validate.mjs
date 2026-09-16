@@ -16,7 +16,7 @@ for (const feature of ['HomeView', 'ChatView', 'WorkspaceView', 'MemoryView', 'M
 }
 
 const server = readFileSync(new URL('./apps/core/src/server.ts', root), 'utf8');
-for (const route of ['/api/bootstrap', '/api/home', '/api/weather/locations', '/api/conversations', '/api/projects', '/api/memory/breath', '/api/memories', '/api/memory/seed/preview', '/api/moments', '/api/moments/read', '/api/moments/life', '/comments', '/like', "req.method==='DELETE'", '/api/mcp', '/api/events', '/api/notifications', '/api/proactive/messages']) {
+for (const route of ['/api/bootstrap', '/api/home', '/api/weather/locations', '/api/conversations', '/api/projects', '/api/memory/breath', '/api/memories', '/api/memory/seed/preview', '/api/moments', '/api/moments/read', '/api/moments/life', '/comments', '/like', "req.method==='DELETE'", '/api/mcp', '/api/events', '/api/notifications', '/api/proactive/messages', '/api/cyberdaddy', '/api/commitments']) {
   if (!server.includes(route)) throw new Error(`Core route is missing: ${route}`);
 }
 

@@ -223,6 +223,48 @@ export const migrations: SchemaMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_notifications_event ON notifications(event_id);
     `,
   },
+  {
+    version: 7,
+    name: 'cyberdaddy_supervision',
+    sql: `
+      CREATE TABLE IF NOT EXISTS cyberdaddy_domains (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        intensity TEXT NOT NULL DEFAULT 'normal',
+        settings_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS commitments (
+        id TEXT PRIMARY KEY,
+        domain_id TEXT NOT NULL REFERENCES cyberdaddy_domains(id),
+        description TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        target_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        source_conversation_id TEXT,
+        last_followup_at TEXT,
+        next_followup_at TEXT,
+        followup_count INTEGER NOT NULL DEFAULT 0,
+        metadata_json TEXT NOT NULL DEFAULT '{}'
+      );
+      CREATE TABLE IF NOT EXISTS commitment_followups (
+        id TEXT PRIMARY KEY,
+        commitment_id TEXT NOT NULL REFERENCES commitments(id) ON DELETE CASCADE,
+        action TEXT NOT NULL,
+        message TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        event_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_commitments_due ON commitments(status,target_at,next_followup_at);
+      CREATE INDEX IF NOT EXISTS idx_commitments_domain ON commitments(domain_id,status,updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_commitment_followups_created ON commitment_followups(commitment_id,created_at DESC);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0;

@@ -15,6 +15,7 @@ import { MomentsService } from './moments-service.js';
 import { CodexSocialGenerator } from './social-generator.js';
 import { SocialLifeEngine } from './social-life.js';
 import { EventService } from './event-service.js';
+import { CyberDaddyService } from './cyberdaddy-service.js';
 
 const appRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const dataRoot = resolve(process.env.SOREN_DATA_ROOT || resolve(appRoot, '..', 'data'));
@@ -33,10 +34,12 @@ await workspace.init();
 const ombre = new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT || 'http://127.0.0.1:18001/mcp');
 const memory = new MemoryService(ombre,db);
 const events = new EventService(db);
+const cyberDaddy = new CyberDaddyService(db,events);
 const moments = new MomentsService(db,post=>events.emit({type:'moment.created',sourceType:'moment',sourceId:post.id,title:`${post.actor.nickname} 的朋友圈`,body:post.content||post.imageDescription,payload:{authorId:post.authorId}}));
 const codex = new CodexRuntime(process.env.CODEX_APP_SERVER_ENDPOINT || 'ws://127.0.0.1:8765');
 const socialLife = new SocialLifeEngine(db,moments,new CodexSocialGenerator(codex,db,momentsRuntimeRoot));
 socialLife.start();
+cyberDaddy.start();
 const require = createRequire(import.meta.url);
 const { CyberbossAdapter } = require(join(appRoot, 'soren-core', 'cyberboss-adapter.cjs')) as { CyberbossAdapter: new (options: any) => any };
 const cyberboss = new CyberbossAdapter({ stateDir: join(dataRoot, 'cyberboss') });
@@ -118,9 +121,17 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='PUT'&&path==='/api/home/note'){const input=await body(req),content=String(input.content||'').trim();if(!content)return json(res,400,{message:'Home Note 不能为空'});const note=db.setHomeNote(content.slice(0,2000));events.emit({type:'home_note.created',sourceType:'home_note',sourceId:note.id,title:'Soren 留给你',body:note.content});return json(res,200,{note});}
     if(req.method==='GET'&&path==='/api/weather/locations'){const query=String(url.searchParams.get('q')||'').trim();if(query.length<2)return json(res,200,{locations:[]});try{return json(res,200,{locations:await weatherProvider.search(query)});}catch{return json(res,200,{locations:[]});}}
     if(req.method==='GET'&&path==='/api/reminders')return json(res,200,{reminders:cyberboss.listReminders()});
-    if(req.method==='POST'&&path==='/api/reminders'){const input=await body(req),reminder=cyberboss.createReminder(input),important=Boolean(input.important)||Number(input.importance)>=8,event=events.emit({type:important?'reminder.important':'reminder.created',sourceType:'reminder',sourceId:String(reminder.id||crypto.randomUUID()),title:String(reminder.title||input.title||'提醒'),body:String(reminder.detail||reminder.text||input.detail||input.text||''),payload:{important}});return json(res,201,{reminder,event});}
+    if(req.method==='POST'&&path==='/api/reminders'){const input=await body(req),reminder=cyberboss.createReminder(input),event=events.emit({type:'reminder.created',sourceType:'reminder',sourceId:String(reminder.id||crypto.randomUUID()),title:'提醒已创建',body:String(reminder.text||input.text||''),payload:{important:Boolean(reminder.important),dueAt:reminder.dueAt}});return json(res,201,{reminder,event});}
     if(req.method==='GET'&&path==='/api/inbox')return json(res,200,{messages:cyberboss.listInbox()});
     if(req.method==='GET'&&path==='/api/timeline')return json(res,200,{events:cyberboss.listTimeline()});
+    if(req.method==='GET'&&path==='/api/cyberdaddy')return json(res,200,cyberDaddy.snapshot());
+    if(req.method==='PATCH'&&path==='/api/cyberdaddy')return json(res,200,cyberDaddy.updateConfig(await body(req)));
+    if(req.method==='POST'&&path==='/api/cyberdaddy/pulse')return json(res,200,await cyberDaddy.pulse());
+    let cyberMatch=route(path,/^\/api\/cyberdaddy\/domains\/([^/]+)$/);
+    if(cyberMatch&&req.method==='PATCH'){const domain=cyberDaddy.updateDomain(cyberMatch[1],await body(req));if(!domain)return json(res,404,{message:'监督领域不存在'});return json(res,200,{domain,snapshot:cyberDaddy.snapshot()});}
+    if(req.method==='POST'&&path==='/api/commitments')return json(res,201,{commitment:cyberDaddy.createCommitment(await body(req)),snapshot:cyberDaddy.snapshot()});
+    cyberMatch=route(path,/^\/api\/commitments\/([^/]+)$/);
+    if(cyberMatch&&req.method==='PATCH'){const commitment=cyberDaddy.updateCommitment(cyberMatch[1],await body(req));if(!commitment)return json(res,404,{message:'承诺不存在'});return json(res,200,{commitment,snapshot:cyberDaddy.snapshot()});}
     if(req.method==='GET'&&path==='/api/moments')return json(res,200,moments.feed(Number(url.searchParams.get('limit')||50),String(url.searchParams.get('actorId')||'')));
     if(req.method==='POST'&&path==='/api/moments'){const input=await body(req);try{const moment=moments.publishUser(input);return json(res,201,{moment,unreadCount:moments.social.unreadCount()});}catch(error:any){return json(res,400,{message:error?.message||'动态没有发布成功'});}}
     if(req.method==='POST'&&path==='/api/moments/read'){const input=await body(req);return json(res,200,moments.read(input.ids));}
@@ -218,7 +229,7 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='PUT'&&path==='/api/settings'){const input=await body(req);for(const [key,value]of Object.entries(input.settings||{}))db.setSetting(key,value);for(const [name,content]of Object.entries(input.persona||{})){if(!(name in personaDefaults))continue;await writeFile(join(personaRoot,name),String(content),'utf8');}return json(res,200,{saved:true});}
     if(path.startsWith('/api/'))return json(res,404,{message:'Unknown API route'});
     return serveStatic(req,res);
-  } catch(error:any){const message=error?.message||'Soren Core error';const status=/拒绝|无效文件路径/.test(message)?403:/不存在|不能为空/.test(message)?400:500;return json(res,status,{message});}
+  } catch(error:any){const message=error?.message||'Soren Core error';const status=/拒绝|无效文件路径/.test(message)?403:/不存在|不能为空|无效|必须/.test(message)?400:500;return json(res,status,{message});}
 });
-setInterval(()=>cyberboss.pollDue(),5000).unref();
+setInterval(()=>{for(const reminder of cyberboss.pollDue()){events.emit({type:reminder.important?'reminder.important':'reminder.due',sourceType:'reminder',sourceId:String(reminder.id),title:reminder.important?'重要提醒':'提醒',body:String(reminder.text||''),dedupeKey:`reminder:due:${reminder.id}`,payload:{dueAt:reminder.dueAt,important:Boolean(reminder.important)}});}},5000).unref();
 server.listen(port,host,()=>console.log(`Soren Core v2 running at http://${host}:${port}`));

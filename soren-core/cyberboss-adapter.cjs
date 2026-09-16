@@ -37,13 +37,13 @@ class CyberbossAdapter {
     return this.readList(this.remindersFile).sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt));
   }
 
-  createReminder({ text, delay = '', delayMinutes, at = '', dueAt = '' }) {
+  createReminder({ text, delay = '', delayMinutes, at = '', dueAt = '', important = false, importance = 0 }) {
     const normalizedText = String(text || '').trim();
     if (!normalizedText) throw new Error('提醒内容不能为空');
     const dueAtMs = resolveDueAtMs({ delay, delayMinutes, at, dueAt });
     if (!Number.isFinite(dueAtMs) || dueAtMs <= Date.now()) throw new Error('提醒时间必须晚于现在');
     const reminders = this.readList(this.remindersFile);
-    const reminder = { id: crypto.randomUUID(), text: normalizedText, dueAt: new Date(dueAtMs).toISOString(), createdAt: new Date().toISOString(), deliveredAt: null };
+    const reminder = { id: crypto.randomUUID(), text: normalizedText, dueAt: new Date(dueAtMs).toISOString(), createdAt: new Date().toISOString(), deliveredAt: null, important: Boolean(important) || Number(importance) >= 8 };
     reminders.push(reminder);
     this.writeList(this.remindersFile, reminders);
     this.addTimeline({ kind: 'reminder', title: '创建提醒', detail: normalizedText });

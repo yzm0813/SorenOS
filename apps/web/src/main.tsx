@@ -5,4 +5,5 @@ import './styles.css';
 import './home.css';
 import './memory.css';
 import './moments.css';
+import './cyberdaddy.css';
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

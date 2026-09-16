@@ -199,6 +199,60 @@ export interface NotificationRecord {
   dedupeKey: string;
 }
 
+export type CyberDaddyIntensity = 'gentle' | 'normal' | 'daddy';
+export type CommitmentStatus = 'active' | 'completed' | 'cancelled';
+export type FollowUpAction = 'NO_ACTION' | 'REMIND' | 'FOLLOW_UP' | 'REDUCE_TASK' | 'POSTPONE' | 'CHECK_IN';
+
+export interface CyberDaddyDomain {
+  id: string;
+  name: string;
+  enabled: boolean;
+  intensity: CyberDaddyIntensity;
+  settings: Record<string,unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Commitment {
+  id: string;
+  domainId: string;
+  description: string;
+  status: CommitmentStatus;
+  targetAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  sourceConversationId: string | null;
+  lastFollowUpAt: string | null;
+  nextFollowUpAt: string | null;
+  followUpCount: number;
+  metadata: Record<string,unknown>;
+}
+
+export interface CommitmentFollowUp {
+  id: string;
+  commitmentId: string;
+  action: FollowUpAction;
+  message: string;
+  reason: string;
+  eventId: string | null;
+  createdAt: string;
+}
+
+export interface CyberDaddySnapshot {
+  enabled: boolean;
+  paused: boolean;
+  quietStart: string;
+  quietEnd: string;
+  inQuietHours: boolean;
+  running: boolean;
+  lastPulseAt: string | null;
+  lastOutcome: string;
+  domains: CyberDaddyDomain[];
+  commitments: Commitment[];
+  followUps: CommitmentFollowUp[];
+}
+
 export type MemoryScope = 'core' | 'long_term' | 'project' | 'temporary';
 export type MemorySyncStatus = 'pending' | 'synced' | 'failed';
 

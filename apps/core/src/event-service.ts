@@ -20,6 +20,7 @@ const deliveryPolicy:Record<string,DeliveryChannel[]>={
   'moment.created':['in_app'],
   'assistant.proactive_message':['chat','system'],
   'reminder.important':['chat','system'],
+  'cyberdaddy.followup_due':['chat','system'],
 };
 
 export class EventService {
