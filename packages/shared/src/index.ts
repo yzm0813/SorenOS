@@ -290,6 +290,17 @@ export interface MemorySeedItem {
   provenance?: string;
 }
 
+export interface SorenSelfState {
+  currentInterests: string[];
+  ongoingPersonalThreads: string[];
+  recentReflections: string[];
+  digitalLifeState: string;
+  activePersonalProjects: string[];
+  socialRelationships: Record<string,string>;
+  lastMeaningfulLifeEvents: string[];
+  updatedAt: string;
+}
+
 export type TurnEvent =
   | { type: 'assistant.delta'; conversationId: string; turnId: string; text: string }
   | { type: 'thinking.summary'; conversationId: string; turnId: string; text: string }

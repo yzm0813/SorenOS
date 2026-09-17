@@ -1,4 +1,5 @@
 import type { Commitment, CyberDaddyDomain, FollowUpAction } from '@soren/shared';
+import type { SorenIdentitySource } from './persona-service.js';
 
 export interface CyberDaddyEvaluationInput {
   commitment: Commitment;
@@ -32,10 +33,7 @@ export class RuleBasedCyberDaddyEvaluator implements CyberDaddyContextEvaluator 
   }
 }
 
-// Adapter boundary for a future Codex-backed evaluator. The caller must inject a
-// delegate that already includes the shared Soren Core identity. No persona or
-// memory is owned by this adapter.
 export class CodexCyberDaddyEvaluator implements CyberDaddyContextEvaluator {
-  constructor(private readonly delegate:(input:CyberDaddyEvaluationInput)=>Promise<unknown>){}
-  async evaluate(input:CyberDaddyEvaluationInput){const raw=await this.delegate(input) as any,actions:FollowUpAction[]=['NO_ACTION','REMIND','FOLLOW_UP','REDUCE_TASK','POSTPONE','CHECK_IN'];if(!raw||!actions.includes(raw.action))throw new Error('context evaluator returned an invalid action');const nextAt=raw.nextEligibleFollowUpAt==null?null:String(raw.nextEligibleFollowUpAt);if(nextAt&&!Number.isFinite(Date.parse(nextAt)))throw new Error('context evaluator returned an invalid nextEligibleFollowUpAt');return{action:raw.action,message:String(raw.message||'').slice(0,4000),reason:String(raw.reason||'contextual evaluator').slice(0,500),nextEligibleFollowUpAt:nextAt};}
+  constructor(private readonly identity:SorenIdentitySource,private readonly delegate:(input:CyberDaddyEvaluationInput,prompt:string)=>Promise<unknown>){}
+  async evaluate(input:CyberDaddyEvaluationInput){const prompt=await this.identity.scene('你正在决定现在是否适合提醒一个 commitment。只根据当前承诺、近期上下文和监督设置返回结构化决定；这是 Soren 的一个行为模式，不是另一人格。'),raw=await this.delegate(input,`${prompt}\n\n=== Commitment Context ===\n${JSON.stringify(input)}`) as any,actions:FollowUpAction[]=['NO_ACTION','REMIND','FOLLOW_UP','REDUCE_TASK','POSTPONE','CHECK_IN'];if(!raw||!actions.includes(raw.action))throw new Error('context evaluator returned an invalid action');const nextAt=raw.nextEligibleFollowUpAt==null?null:String(raw.nextEligibleFollowUpAt);if(nextAt&&!Number.isFinite(Date.parse(nextAt)))throw new Error('context evaluator returned an invalid nextEligibleFollowUpAt');return{action:raw.action,message:String(raw.message||'').slice(0,4000),reason:String(raw.reason||'contextual evaluator').slice(0,500),nextEligibleFollowUpAt:nextAt};}
 }

@@ -11,7 +11,7 @@ export function SettingsView(){
   const[mcp,setMcp]=useState<any>({servers:[],permissions:[]});
   const[diagnostics,setDiagnostics]=useState<Diagnostics>({events:[],notifications:[]});
   const[notificationPermission,setNotificationPermission]=useState(typeof Notification==='undefined'?'unsupported':Notification.permission);
-  const[activePersona,setActivePersona]=useState('core.md'),[saved,setSaved]=useState(false);
+  const[activePersona,setActivePersona]=useState('SOREN_CORE.md'),[saved,setSaved]=useState(false);
   const[locationQuery,setLocationQuery]=useState(''),[locations,setLocations]=useState<WeatherLocation[]>([]),[searching,setSearching]=useState(false);
 
   useEffect(()=>{

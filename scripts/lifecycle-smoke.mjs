@@ -11,6 +11,8 @@ try{
   let ready=false;
   for(let attempt=0;attempt<50;attempt++){await new Promise(resolveWait=>setTimeout(resolveWait,100));try{const response=await fetch(`http://127.0.0.1:${port}/api/health`);if(response.ok){ready=true;break;}}catch{}}
   if(!ready)throw new Error(`Core did not become ready: ${stderr}`);
+  const health=await(await fetch(`http://127.0.0.1:${port}/api/health`)).json();
+  if(health.personaVersion!=='v0.1')throw new Error(`Unexpected persona version: ${health.personaVersion}`);
   for(const path of ['/api/home','/api/conversations','/api/projects','/api/moments','/api/cyberdaddy','/api/settings']){
     const response=await fetch(`http://127.0.0.1:${port}${path}`);
     if(!response.ok)throw new Error(`${path} returned ${response.status}: ${await response.text()}`);

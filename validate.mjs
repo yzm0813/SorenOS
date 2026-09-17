@@ -15,6 +15,11 @@ for (const feature of ['HomeView', 'ChatView', 'WorkspaceView', 'MemoryView', 'M
   if (!app.includes(`<${feature}`)) throw new Error(`App shell does not mount ${feature}.`);
 }
 
+const sorenCore = readFileSync(new URL('./persona/SOREN_CORE.md', root), 'utf8');
+if (!sorenCore.startsWith('# Soren Core v0.1')) throw new Error('Soren Core identity source or version is missing.');
+const socialGenerator = readFileSync(new URL('./apps/core/src/social-generator.ts', root), 'utf8');
+if (!socialGenerator.includes("request.actor.id==='soren'?await identity.scene")) throw new Error('Soren SocialLife generation does not load the shared identity source.');
+
 const routeRoot = new URL('./apps/core/src/routes/', root);
 const server = [readFileSync(new URL('./apps/core/src/server.ts', root), 'utf8'), ...readdirSync(routeRoot).filter(name => name.endsWith('.ts')).map(name => readFileSync(new URL(name, routeRoot), 'utf8'))].join('\n');
 for (const route of ['/api/bootstrap', '/api/home', '/api/weather/locations', '/api/conversations', '/api/projects', '/api/memory/breath', '/api/memories', '/api/memory/seed/preview', '/api/moments', '/api/moments/read', '/api/moments/life', '/comments', '/like', "req.method==='DELETE'", '/api/mcp', '/api/events', '/api/notifications', '/api/proactive/messages', '/api/cyberdaddy', '/api/commitments']) {

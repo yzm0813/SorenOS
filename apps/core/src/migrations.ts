@@ -276,6 +276,23 @@ export const migrations: SchemaMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_commitments_recurrence ON commitments(status,recurrence,cycle_key);
     `,
   },
+  {
+    version: 9,
+    name: 'soren_self_state',
+    sql: `
+      CREATE TABLE IF NOT EXISTS soren_self_state (
+        id TEXT PRIMARY KEY CHECK(id='soren'),
+        current_interests_json TEXT NOT NULL DEFAULT '[]',
+        ongoing_personal_threads_json TEXT NOT NULL DEFAULT '[]',
+        recent_reflections_json TEXT NOT NULL DEFAULT '[]',
+        digital_life_state TEXT NOT NULL DEFAULT '',
+        active_personal_projects_json TEXT NOT NULL DEFAULT '[]',
+        social_relationships_json TEXT NOT NULL DEFAULT '{}',
+        last_meaningful_life_events_json TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0;
