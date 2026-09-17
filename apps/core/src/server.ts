@@ -49,7 +49,7 @@ const host=process.env.SOREN_HOST||'127.0.0.1',port=Number(process.env.SOREN_POR
 const turns=new ConversationTurnService({db,memory,workspace,codex,socialLife,moments,persona,selfState,workspaceRoot,attachmentRoot,http:httpTools});
 const weatherProvider=new OpenMeteoWeatherProvider();
 const routes:RouteHandler[]=[
-  createHomeRoutes({db,events,moments,cyberboss,weatherProvider,memory,codex,homeNote,personaVersion:identity.version,http:httpTools}),
+  createHomeRoutes({db,events,moments,cyberboss,weatherProvider,memory,codex,homeNote,persona,http:httpTools}),
   createConversationRoutes({db,turns,http:httpTools}),createWorkspaceRoutes({db,workspace,http:httpTools}),createMemoryRoutes({memory,http:httpTools}),
   createMomentsRoutes({moments,socialLife,db,http:httpTools}),createCyberDaddyRoutes({service:cyberDaddy,http:httpTools}),
   createNotificationRoutes({db,events,http:httpTools}),createSettingsRoutes({db,persona,selfState,http:httpTools}),createMcpRoutes({ombre,memory,db,http:httpTools})
