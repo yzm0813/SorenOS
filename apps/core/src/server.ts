@@ -46,7 +46,7 @@ const homeNote=db.ensureHomeNote('我在这里。今天想说话，或者想一�
 const workspace=new WorkspaceService(workspaceRoot);await workspace.init();
 const persona=new PersonaService(personaRoot);await persona.init();const identity=await persona.identity();
 const ombre=new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT||'http://127.0.0.1:18001/mcp');
-const memory=new MemoryService(ombre,db),selfState=new SelfStateService(db),pushProvider=new WebPushNotificationProvider({publicKey:process.env.SOREN_VAPID_PUBLIC_KEY||'',privateKey:process.env.SOREN_VAPID_PRIVATE_KEY||'',subject:process.env.SOREN_VAPID_SUBJECT||''}),push=new PushDeliveryService(db,pushProvider),events=new EventService(db,push),cyberDaddy=new CyberDaddyService(db,events);
+const memory=new MemoryService(ombre,db),selfState=new SelfStateService(db),pushProvider=new WebPushNotificationProvider({publicKey:process.env.SOREN_VAPID_PUBLIC_KEY||'',privateKey:process.env.SOREN_VAPID_PRIVATE_KEY||'',subject:process.env.SOREN_VAPID_SUBJECT||'',proxy:process.env.SOREN_PUSH_PROXY||process.env.HTTPS_PROXY||process.env.HTTP_PROXY||''}),push=new PushDeliveryService(db,pushProvider),events=new EventService(db,push),cyberDaddy=new CyberDaddyService(db,events);
 const moments=new MomentsService(db,post=>events.emit({type:'moment.created',sourceType:'moment',sourceId:post.id,title:`${post.actor.nickname} 的朋友圈`,body:post.content||post.imageDescription,payload:{authorId:post.authorId}}));
 const codex=new CodexRuntime(process.env.CODEX_APP_SERVER_ENDPOINT||'ws://127.0.0.1:8765');
 const socialLife=new SocialLifeEngine(db,moments,new CodexSocialGenerator(codex,db,momentsRuntimeRoot,persona),selfState);
