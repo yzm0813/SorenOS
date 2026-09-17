@@ -12,3 +12,4 @@ apps/*/dist/
 *.db-shm
 *.db-wal
 data/
+.lan/

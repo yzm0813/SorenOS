@@ -11,6 +11,7 @@ export function SettingsView(){
   const[persona,setPersona]=useState<Record<string,string>>({});
   const[mcp,setMcp]=useState<any>({servers:[],permissions:[]});
   const[diagnostics,setDiagnostics]=useState<Diagnostics>({events:[],notifications:[]});
+  const[network,setNetwork]=useState<{lanMode:boolean;secure:boolean;authentication:boolean;phoneUrl:string|null}|null>(null);
   const[push,setPush]=useState<PushUiStatus|null>(null),[pushBusy,setPushBusy]=useState(false),[pushError,setPushError]=useState('');
   const[activePersona,setActivePersona]=useState('SOREN_CORE.md'),[saved,setSaved]=useState(false);
   const[locationQuery,setLocationQuery]=useState(''),[locations,setLocations]=useState<WeatherLocation[]>([]),[searching,setSearching]=useState(false);
@@ -18,6 +19,7 @@ export function SettingsView(){
   useEffect(()=>{
     api<any>('/api/settings').then(data=>{setSettings(data.settings);setPersona(data.persona);if(data.settings.weatherLocation)setLocationQuery(data.settings.weatherLocation.name)});
     api<any>('/api/mcp').then(setMcp).catch(()=>{});
+    api<any>('/api/bootstrap').then(data=>setNetwork(data.network)).catch(()=>{});
     pushStatus().then(setPush).catch(error=>setPushError(error.message));
     Promise.all([api<{events:DomainEvent[]}>('/api/events?limit=8'),api<{notifications:NotificationRecord[]}>('/api/notifications?limit=8')]).then(([eventData,notificationData])=>setDiagnostics({events:eventData.events,notifications:notificationData.notifications})).catch(()=>{});
   },[]);
@@ -53,6 +55,9 @@ export function SettingsView(){
       </article>
 
       <article className="panel">
+        <h2>连接状态</h2>
+        <div className="connection-diagnostics"><div><strong>Core</strong><span>Online</span></div><div><strong>Connection</strong><span>{network?.lanMode?'LAN Test Mode':'Localhost'}</span></div><div><strong>HTTPS</strong><span>{window.isSecureContext?'Secure':'Not secure'}</span></div><div><strong>Authentication</strong><span>{network?.lanMode?'OFF':'Local only'}</span></div><div><strong>Push</strong><span>{push?.browserSupported?'Supported':'Unsupported'}</span></div><div><strong>Permission</strong><span>{push?.permission||'unknown'}</span></div></div>
+        {network?.lanMode&&<p className="lan-warning">只可在可信私人 Wi-Fi 使用。当前没有登录或设备认证，禁止用于公共、公司、学校、酒店或访客网络。</p>}
         <h2>MCP Connections</h2>
         {mcp.servers?.map((server:any)=><div className="mcp-server" key={server.id}><div><strong>{server.name}</strong><span className={server.status?.connected?'connected':''}>{server.status?.connected?'已连接':'暂不可达'}</span></div>{(server.tools||[]).map((tool:any)=>{const current=mcp.permissions?.find((permission:any)=>permission.server===server.id&&permission.tool===tool.name);return <label key={tool.name}><span>{tool.name}<small>{tool.description}</small></span><select value={current?.permission||'ask_each_time'} onChange={async event=>{const permission={server:server.id,tool:tool.name,permission:event.target.value,risk:/delete|archive|write|exec/i.test(tool.name)?'high':'low'};await api('/api/mcp/permissions',{method:'PUT',body:JSON.stringify(permission)});setMcp({...mcp,permissions:[...(mcp.permissions||[]).filter((item:any)=>!(item.server===server.id&&item.tool===tool.name)),permission]});}}><option value="always_allow">始终允许</option><option value="ask_each_time">每次询问</option><option value="disabled">停用</option></select></label>})}</div>)}
 

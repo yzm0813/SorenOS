@@ -8,6 +8,9 @@
     "dev:web": "pnpm --filter @soren/web dev",
     "build": "pnpm --filter @soren/web build && pnpm --filter @soren/core build",
     "start": "pnpm --filter @soren/core start",
-    "test": "pnpm --filter @soren/core test"
+    "test": "pnpm --filter @soren/core test",
+    "lan:setup": "pnpm --filter @soren/core exec tsx src/lan-cli.ts setup",
+    "lan:status": "pnpm --filter @soren/core exec tsx src/lan-cli.ts status",
+    "lan:start": "pnpm --filter @soren/core exec tsx src/lan-cli.ts start"
   }
 }

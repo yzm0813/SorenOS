@@ -8,4 +8,6 @@ Phase 5.7A 的链路是：`CyberDaddy / 主动事件 → EventService → Chat �
 
 PWA 由 `manifest.webmanifest`、静态 shell cache 与 Service Worker 构成。API 从不缓存；离线时只能打开最近缓存的外壳，不能发送 Chat。点击通知会优先聚焦已打开的 SorenOS，并进入对应会话。Badging API 可用时显示 badge，不支持时静默降级。
 
-Core 仍只监听 `127.0.0.1:8787`。这能安全支持同一台电脑的 PWA，但手机不能直接访问电脑 localhost。当前也没有局域网鉴权和受信任 HTTPS，所以没有把 Core 改绑 `0.0.0.0`。真机入口需要下一小阶段提供 HTTPS 反向代理、设备认证和受限网络访问；公网不得直接暴露 Core API。
+默认 Core 仍只监听 `127.0.0.1:8787`。Phase 5.7.1 增加显式 `SOREN_LAN_MODE=true`：同一 Core 保留电脑的 localhost HTTP 入口，同时在 `0.0.0.0:8788` 增加带当前私人 LAN IP SAN 的 HTTPS 入口。前端 API、Chat SSE 流和 Push deep link 都使用相对 origin，因此手机与电脑各自留在自己的同源地址；不需要 `Access-Control-Allow-Origin: *`。
+
+LAN Test Mode 没有认证，只允许可信家庭 Wi-Fi。`lan:setup` 生成本地 CA 与一年期 server certificate，全部保存在 Git 忽略的 `.lan/`；`lan:status` 在 DHCP 地址改变时报告 SAN 不匹配，`lan:start` 会拒绝用错误证书启动。该模式不创建公网隧道、不修改路由器，也不自动关闭或永久放开 Windows 防火墙。
