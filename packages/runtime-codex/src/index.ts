@@ -123,4 +123,10 @@ export class CodexRuntime {
     await this.initialize();
     return this.client.cancelTurn({ threadId, turnId });
   }
+
+  async dispose() {
+    await this.client.close();
+    this.ready = false;
+    this.freshThreads.clear();
+  }
 }

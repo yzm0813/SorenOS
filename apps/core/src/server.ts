@@ -1,235 +1,68 @@
-import http, { type IncomingMessage, type ServerResponse } from 'node:http';
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { extname, join, normalize, resolve, sep } from 'node:path';
+import http from 'node:http';
+import { mkdir } from 'node:fs/promises';
+import { join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { CodexRuntime } from '@soren/runtime-codex';
-import { WorkspaceService, slugifyProject } from '@soren/workspace';
+import { WorkspaceService } from '@soren/workspace';
 import { OmbreMemory } from '@soren/memory';
-import type { HomeTodayItem, ThinkingDepth, ThinkingMode, ToolPermission, TurnEvent, WeatherLocation, WeatherSnapshot } from '@soren/shared';
 import { SorenDatabase } from './db.js';
-import { emptyWeather, OpenMeteoWeatherProvider } from './weather.js';
+import { OpenMeteoWeatherProvider } from './weather.js';
 import { MemoryService } from './memory-service.js';
-import { buildTurnContext } from './context.js';
 import { MomentsService } from './moments-service.js';
 import { CodexSocialGenerator } from './social-generator.js';
 import { SocialLifeEngine } from './social-life.js';
 import { EventService } from './event-service.js';
 import { CyberDaddyService } from './cyberdaddy-service.js';
+import { PersonaService } from './persona-service.js';
+import { ConversationTurnService } from './conversation-turn-service.js';
+import { createHttpTools,type RouteHandler } from './http/index.js';
+import { createStaticHandler } from './static-handler.js';
+import { createHomeRoutes } from './routes/home.js';
+import { createConversationRoutes } from './routes/conversations.js';
+import { createWorkspaceRoutes } from './routes/workspace.js';
+import { createMemoryRoutes } from './routes/memory.js';
+import { createMomentsRoutes } from './routes/moments.js';
+import { createCyberDaddyRoutes } from './routes/cyberdaddy.js';
+import { createNotificationRoutes } from './routes/notifications.js';
+import { createSettingsRoutes } from './routes/settings.js';
+import { createMcpRoutes } from './routes/mcp.js';
 
-const appRoot = fileURLToPath(new URL('../../../', import.meta.url));
-const dataRoot = resolve(process.env.SOREN_DATA_ROOT || resolve(appRoot, '..', 'data'));
-const workspaceRoot = join(dataRoot, 'workspace');
-const personaRoot = join(dataRoot, 'persona');
-const attachmentRoot = join(dataRoot, 'attachments');
-const logRoot = join(dataRoot, 'logs');
-const momentsRuntimeRoot = join(dataRoot, 'moments-runtime');
-const webDist = join(appRoot, 'dist');
-await Promise.all([mkdir(dataRoot,{recursive:true}),mkdir(workspaceRoot,{recursive:true}),mkdir(personaRoot,{recursive:true}),mkdir(attachmentRoot,{recursive:true}),mkdir(logRoot,{recursive:true}),mkdir(momentsRuntimeRoot,{recursive:true})]);
+const appRoot=fileURLToPath(new URL('../../../',import.meta.url));
+const dataRoot=resolve(process.env.SOREN_DATA_ROOT||resolve(appRoot,'..','data'));
+const workspaceRoot=join(dataRoot,'workspace'),personaRoot=join(dataRoot,'persona'),attachmentRoot=join(dataRoot,'attachments'),logRoot=join(dataRoot,'logs'),momentsRuntimeRoot=join(dataRoot,'moments-runtime'),webDist=join(appRoot,'dist');
+await Promise.all([dataRoot,workspaceRoot,personaRoot,attachmentRoot,logRoot,momentsRuntimeRoot].map(path=>mkdir(path,{recursive:true})));
 
-const db = new SorenDatabase(join(dataRoot, 'soren.db'));
-const homeNote = db.ensureHomeNote('我在这里。今天想说话，或者想一起做点什么，都可以来找我。');
-const workspace = new WorkspaceService(workspaceRoot);
-await workspace.init();
-const ombre = new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT || 'http://127.0.0.1:18001/mcp');
-const memory = new MemoryService(ombre,db);
-const events = new EventService(db);
-const cyberDaddy = new CyberDaddyService(db,events);
-const moments = new MomentsService(db,post=>events.emit({type:'moment.created',sourceType:'moment',sourceId:post.id,title:`${post.actor.nickname} 的朋友圈`,body:post.content||post.imageDescription,payload:{authorId:post.authorId}}));
-const codex = new CodexRuntime(process.env.CODEX_APP_SERVER_ENDPOINT || 'ws://127.0.0.1:8765');
-const socialLife = new SocialLifeEngine(db,moments,new CodexSocialGenerator(codex,db,momentsRuntimeRoot));
-socialLife.start();
-cyberDaddy.start();
-const require = createRequire(import.meta.url);
-const { CyberbossAdapter } = require(join(appRoot, 'soren-core', 'cyberboss-adapter.cjs')) as { CyberbossAdapter: new (options: any) => any };
-const cyberboss = new CyberbossAdapter({ stateDir: join(dataRoot, 'cyberboss') });
-const host = process.env.SOREN_HOST || '127.0.0.1';
-const port = Number(process.env.SOREN_PORT || 8787);
-const allowedOrigin = process.env.SOREN_WEB_ORIGIN || 'http://127.0.0.1:5173';
-const activeTurns = new Map<string, { threadId: string; codexTurnId: string }>();
-const weatherProvider = new OpenMeteoWeatherProvider();
-const weatherCache = new Map<string,{expires:number,value:WeatherSnapshot}>();
-const personaDefaults: Record<string,string> = {
-  'core.md': '# Core\n\n你是 Soren，运行在用户自己的私人聊天软件中，是长期、可靠、自然的私人伴侣。',
-  'language-style.md': '# Language style\n\n直接、清楚、自然；根据用户的语言和语气回应，不堆砌套话。',
-  'boundaries.md': '# Boundaries\n\n保护隐私，不展示内部推理；只在用户明确授权时执行高风险操作。',
-  'work-mode.md': '# Work mode\n\n处理工作时先给结论，主动完成可逆步骤，清楚说明结果与验证。',
-  'novel-mode.md': '# Novel mode\n\n讨论创作时尊重既有人物、语气和世界观，指出逻辑问题并给出可落地修法。'
-};
-for (const [name, content] of Object.entries(personaDefaults)) {
-  const path = join(personaRoot, name);
-  try { await stat(path); } catch { await writeFile(path, content, 'utf8'); }
-}
+const db=new SorenDatabase(join(dataRoot,'soren.db'));
+const homeNote=db.ensureHomeNote('我在这里。今天想说话，或者想一起做点什么，都可以来找我。');
+const workspace=new WorkspaceService(workspaceRoot);await workspace.init();
+const ombre=new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT||'http://127.0.0.1:18001/mcp');
+const memory=new MemoryService(ombre,db),events=new EventService(db),cyberDaddy=new CyberDaddyService(db,events);
+const moments=new MomentsService(db,post=>events.emit({type:'moment.created',sourceType:'moment',sourceId:post.id,title:`${post.actor.nickname} 的朋友圈`,body:post.content||post.imageDescription,payload:{authorId:post.authorId}}));
+const codex=new CodexRuntime(process.env.CODEX_APP_SERVER_ENDPOINT||'ws://127.0.0.1:8765');
+const socialLife=new SocialLifeEngine(db,moments,new CodexSocialGenerator(codex,db,momentsRuntimeRoot));
+const persona=new PersonaService(personaRoot);await persona.init();
+const require=createRequire(import.meta.url),{CyberbossAdapter}=require(join(appRoot,'soren-core','cyberboss-adapter.cjs')) as {CyberbossAdapter:new(options:any)=>any};
+const cyberboss=new CyberbossAdapter({stateDir:join(dataRoot,'cyberboss')});
+const host=process.env.SOREN_HOST||'127.0.0.1',port=Number(process.env.SOREN_PORT||8787),httpTools=createHttpTools(process.env.SOREN_WEB_ORIGIN||'http://127.0.0.1:5173');
+const turns=new ConversationTurnService({db,memory,workspace,codex,socialLife,moments,persona,workspaceRoot,attachmentRoot,http:httpTools});
+const weatherProvider=new OpenMeteoWeatherProvider();
+const routes:RouteHandler[]=[
+  createHomeRoutes({db,events,moments,cyberboss,weatherProvider,memory,codex,homeNote,http:httpTools}),
+  createConversationRoutes({db,turns,http:httpTools}),createWorkspaceRoutes({db,workspace,http:httpTools}),createMemoryRoutes({memory,http:httpTools}),
+  createMomentsRoutes({moments,socialLife,db,http:httpTools}),createCyberDaddyRoutes({service:cyberDaddy,http:httpTools}),
+  createNotificationRoutes({db,events,http:httpTools}),createSettingsRoutes({db,persona,http:httpTools}),createMcpRoutes({ombre,memory,db,http:httpTools})
+];
+const serveStatic=createStaticHandler(webDist,httpTools);
 
-const cors = () => ({ 'Access-Control-Allow-Origin': allowedOrigin, 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS' });
-function json(res: ServerResponse, status: number, body: unknown) { res.writeHead(status,{...cors(),'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(body)); }
-async function body(req: IncomingMessage, limit = 12_000_000) { let raw=''; for await (const chunk of req) { raw += chunk; if (raw.length > limit) throw new Error('请求内容过大'); } return raw ? JSON.parse(raw) : {}; }
-function sse(res: ServerResponse) { res.writeHead(200,{...cors(),'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','Connection':'keep-alive'}); res.write(': connected\n\n'); return (event:TurnEvent) => res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`); }
-function route(pathname:string, pattern:RegExp) { return pathname.match(pattern); }
-function cleanName(value:unknown, fallback='未命名') { return String(value || '').trim().slice(0,80) || fallback; }
-function validThinking(value:unknown): ThinkingMode { return value === 'off' || value === 'always' ? value : 'auto'; }
-function validDepth(value:unknown): ThinkingDepth { return value === 'deep' ? 'deep' : 'quick'; }
-function wantsHold(text:string) { return /(记住|帮我记下|记一下|以后要记得|remember this|save this to memory)/i.test(text); }
-function complexTask(text:string) { return text.length > 500 || /(分析|架构|调试|debug|重构|长文|方案|比较|为什么|review|implement)/i.test(text); }
-function isSociallyMeaningful(text:string) { return wantsHold(text) || complexTask(text) || /(修好|完成|封版|kindle|claude|吵架|和好|旅行|游戏|读完|看完|项目|发布|纪念|失眠|生日|工作|bug|故障)/i.test(text); }
-function wantsMomentsContext(text:string){return /(朋友圈|动态|点赞|评论|照片|自拍|Kevin|林工|Mori|阿策|陈渡|周屿)/i.test(text);}
-async function personaText() { return (await Promise.all(Object.keys(personaDefaults).map(async name => readFile(join(personaRoot,name),'utf8')))).join('\n\n'); }
-async function probe(url:string) { try { const response=await fetch(url,{signal:AbortSignal.timeout(1500)}); return {configured:true,connected:response.ok}; } catch { return {configured:true,connected:false}; } }
-async function saveAttachments(items:any[], messageId:string) {
-  const saved:Array<{name:string;absolutePath:string;mime:string}> = [];
-  const dir=join(attachmentRoot,messageId); await mkdir(dir,{recursive:true});
-  for (const item of items.slice(0,8)) {
-    const name=cleanName(item.name,'attachment').replace(/[<>:"/\\|?*]/g,'_');
-    const bytes=Buffer.from(String(item.base64||''),'base64');
-    if (!bytes.length || bytes.length>8_000_000) continue;
-    const path=join(dir,`${crypto.randomUUID().slice(0,8)}-${name}`); await writeFile(path,bytes);
-    db.addAttachment(messageId,{name,path,mime:String(item.mime||'application/octet-stream'),size:bytes.length});
-    saved.push({name,absolutePath:path,mime:String(item.mime||'application/octet-stream')});
-  }
-  return saved;
-}
-function conversationRow(row:any) { return { id:row.id,name:row.name,directory:row.directory,type:row.type,previewEntry:row.preview_entry,createdAt:row.created_at,updatedAt:row.updated_at }; }
-async function homeWeather() {
-  const location=db.setting<WeatherLocation|null>('weatherLocation',null);if(!location)return emptyWeather('unconfigured');
-  const key=`${location.latitude},${location.longitude}`,cached=weatherCache.get(key);if(cached&&cached.expires>Date.now())return cached.value;
-  try{const value=await weatherProvider.current(location);weatherCache.set(key,{expires:Date.now()+10*60*1000,value});return value;}catch{return emptyWeather('unavailable',location);}
-}
-function homeToday():HomeTodayItem[]{
-  const items:HomeTodayItem[]=[];const conversation=db.conversations()[0];const project=db.projectRows()[0];
-  if(conversation)items.push({type:'chat',id:conversation.id,title:conversation.title,detail:'最近的对话',occurredAt:conversation.updatedAt});
-  if(project)items.push({type:'workspace',id:project.id,title:project.name,detail:'最近的 Workspace 项目',occurredAt:project.updated_at});
-  const reminder=(cyberboss.listReminders()||[]).find((item:any)=>!['done','completed','dismissed'].includes(String(item.status||'').toLowerCase()));
-  if(reminder)items.push({type:'reminder',id:String(reminder.id||'reminder'),title:String(reminder.title||reminder.text||'今天的提醒'),detail:String(reminder.detail||reminder.dueAt||reminder.due_at||'Cyberboss 提醒'),occurredAt:String(reminder.updatedAt||reminder.createdAt||new Date().toISOString())});
-  const event=(cyberboss.listTimeline()||[])[0];if(event)items.push({type:'timeline',id:String(event.id||'timeline'),title:String(event.title||'最近的事件'),detail:String(event.detail||''),occurredAt:String(event.createdAt||new Date().toISOString())});
-  return items.sort((a,b)=>Date.parse(b.occurredAt)-Date.parse(a.occurredAt)).slice(0,4);
-}
+const server=http.createServer(async(req,res)=>{if(req.method==='OPTIONS'){res.writeHead(204,httpTools.cors());res.end();return;}const url=new URL(req.url||'/',`http://${req.headers.host}`),context={req,res,url,path:url.pathname};try{for(const route of routes)if(await route(context))return;if(url.pathname.startsWith('/api/'))return httpTools.json(res,404,{message:'Unknown API route'});await serveStatic(req,res);}catch(error:any){const message=error?.message||'Soren Core error',status=/拒绝|无效文件路径/.test(message)?403:/不存在|不能为空|无效|必须/.test(message)?400:500;httpTools.json(res,status,{message});}});
 
-async function serveStatic(req:IncomingMessage,res:ServerResponse) {
-  const url=new URL(req.url||'/',`http://${req.headers.host}`); const requestPath=url.pathname==='/'?'index.html':decodeURIComponent(url.pathname.slice(1));
-  const target=normalize(join(webDist,requestPath)); if (!target.startsWith(normalize(webDist))) return json(res,403,{message:'Forbidden'});
-  try { const info=await stat(target); const file=info.isDirectory()?join(target,'index.html'):target; const content=await readFile(file); const mime:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png'}; res.writeHead(200,{'Content-Type':mime[extname(file)]||'application/octet-stream'});res.end(content); } catch { json(res,404,{message:'Not found'}); }
-}
+socialLife.start();cyberDaddy.start();
+const reminderTimer=setInterval(()=>{for(const reminder of cyberboss.pollDue()){events.emit({type:reminder.important?'reminder.important':'reminder.due',sourceType:'reminder',sourceId:String(reminder.id),title:reminder.important?'重要提醒':'提醒',body:String(reminder.text||''),dedupeKey:`reminder:due:${reminder.id}`,payload:{dueAt:reminder.dueAt,important:Boolean(reminder.important)}});}},5000);reminderTimer.unref();
 
-const server=http.createServer(async(req,res)=>{
-  if(req.method==='OPTIONS'){res.writeHead(204,cors());return res.end();}
-  const url=new URL(req.url||'/',`http://${req.headers.host}`); const path=url.pathname;
-  try {
-    if(req.method==='GET'&&path==='/api/health') return json(res,200,{ok:true,name:'soren-core',version:2});
-    if(req.method==='GET'&&path==='/api/bootstrap') return json(res,200,{core:{connected:true,version:2},services:{codex:await probe('http://127.0.0.1:8765/readyz'),ombre:await memory.status(),cyberboss:{configured:true,connected:true,mode:'soren-channel'}}});
-    if(req.method==='GET'&&path==='/api/models') return json(res,200,{models:await codex.models()});
-    if(req.method==='GET'&&path==='/api/home')return json(res,200,{note:db.homeNote()||homeNote,weather:await homeWeather(),today:homeToday(),moments:{unreadCount:moments.social.unreadCount(),available:true}});
-    if(req.method==='PUT'&&path==='/api/home/note'){const input=await body(req),content=String(input.content||'').trim();if(!content)return json(res,400,{message:'Home Note 不能为空'});const note=db.setHomeNote(content.slice(0,2000));events.emit({type:'home_note.created',sourceType:'home_note',sourceId:note.id,title:'Soren 留给你',body:note.content});return json(res,200,{note});}
-    if(req.method==='GET'&&path==='/api/weather/locations'){const query=String(url.searchParams.get('q')||'').trim();if(query.length<2)return json(res,200,{locations:[]});try{return json(res,200,{locations:await weatherProvider.search(query)});}catch{return json(res,200,{locations:[]});}}
-    if(req.method==='GET'&&path==='/api/reminders')return json(res,200,{reminders:cyberboss.listReminders()});
-    if(req.method==='POST'&&path==='/api/reminders'){const input=await body(req),reminder=cyberboss.createReminder(input),event=events.emit({type:'reminder.created',sourceType:'reminder',sourceId:String(reminder.id||crypto.randomUUID()),title:'提醒已创建',body:String(reminder.text||input.text||''),payload:{important:Boolean(reminder.important),dueAt:reminder.dueAt}});return json(res,201,{reminder,event});}
-    if(req.method==='GET'&&path==='/api/inbox')return json(res,200,{messages:cyberboss.listInbox()});
-    if(req.method==='GET'&&path==='/api/timeline')return json(res,200,{events:cyberboss.listTimeline()});
-    if(req.method==='GET'&&path==='/api/cyberdaddy')return json(res,200,cyberDaddy.snapshot());
-    if(req.method==='PATCH'&&path==='/api/cyberdaddy')return json(res,200,cyberDaddy.updateConfig(await body(req)));
-    if(req.method==='POST'&&path==='/api/cyberdaddy/pulse')return json(res,200,await cyberDaddy.pulse());
-    let cyberMatch=route(path,/^\/api\/cyberdaddy\/domains\/([^/]+)$/);
-    if(cyberMatch&&req.method==='PATCH'){const domain=cyberDaddy.updateDomain(cyberMatch[1],await body(req));if(!domain)return json(res,404,{message:'监督领域不存在'});return json(res,200,{domain,snapshot:cyberDaddy.snapshot()});}
-    if(req.method==='POST'&&path==='/api/commitments')return json(res,201,{commitment:cyberDaddy.createCommitment(await body(req)),snapshot:cyberDaddy.snapshot()});
-    cyberMatch=route(path,/^\/api\/commitments\/([^/]+)$/);
-    if(cyberMatch&&req.method==='PATCH'){const commitment=cyberDaddy.updateCommitment(cyberMatch[1],await body(req));if(!commitment)return json(res,404,{message:'承诺不存在'});return json(res,200,{commitment,snapshot:cyberDaddy.snapshot()});}
-    if(req.method==='GET'&&path==='/api/moments')return json(res,200,moments.feed(Number(url.searchParams.get('limit')||50),String(url.searchParams.get('actorId')||'')));
-    if(req.method==='POST'&&path==='/api/moments'){const input=await body(req);try{const moment=moments.publishUser(input);return json(res,201,{moment,unreadCount:moments.social.unreadCount()});}catch(error:any){return json(res,400,{message:error?.message||'动态没有发布成功'});}}
-    if(req.method==='POST'&&path==='/api/moments/read'){const input=await body(req);return json(res,200,moments.read(input.ids));}
-    if(req.method==='GET'&&path==='/api/moments/life')return json(res,200,{status:socialLife.status()});
-    if(req.method==='PATCH'&&path==='/api/moments/life'){const input=await body(req);db.setSetting('momentsLifeEnabled',Boolean(input.enabled));return json(res,200,{status:socialLife.status()});}
-    if(req.method==='POST'&&path==='/api/moments/life/pulse')return json(res,202,{status:await socialLife.pulse(Boolean((await body(req)).force))});
-    const momentCommentMatch=route(path,/^\/api\/moments\/([^/]+)\/comments$/);
-    if(momentCommentMatch&&req.method==='POST'){const input=await body(req);try{return json(res,201,{comment:moments.commentUser(momentCommentMatch[1],input)});}catch(error:any){return json(res,404,{message:error?.message||'动态不存在'});}}
-    const momentLikeMatch=route(path,/^\/api\/moments\/([^/]+)\/like$/);
-    if(momentLikeMatch&&req.method==='POST'){try{return json(res,200,moments.likeUser(momentLikeMatch[1]));}catch(error:any){return json(res,404,{message:error?.message||'动态不存在'});}}
-    const momentDeleteMatch=route(path,/^\/api\/moments\/([^/]+)$/);
-    if(momentDeleteMatch&&req.method==='DELETE'){try{return json(res,200,moments.deleteUser(momentDeleteMatch[1]));}catch(error:any){return json(res,403,{message:error?.message||'不能删除这条动态'});}}
-
-    if(req.method==='GET'&&path==='/api/conversations') return json(res,200,{conversations:db.conversations(url.searchParams.get('q')||'',url.searchParams.get('archived')==='1')});
-    if(req.method==='POST'&&path==='/api/conversations') { const input=await body(req); return json(res,201,{conversation:db.createConversation(cleanName(input.title,'新对话'))}); }
-    let match=route(path,/^\/api\/conversations\/([^/]+)$/);
-    if(match&&req.method==='GET'){const conversation=db.conversationById(match[1]);if(!conversation)return json(res,404,{message:'会话不存在'});return json(res,200,{conversation,messages:db.messages(match[1])});}
-    if(match&&req.method==='PATCH'){const input=await body(req);return json(res,200,{conversation:db.updateConversation(match[1],input)});}
-
-    match=route(path,/^\/api\/conversations\/([^/]+)\/turns$/);
-    if(match&&req.method==='POST') {
-      const conversationId=match[1],input=await body(req),conversation=db.conversationById(conversationId);
-      if(!conversation)return json(res,404,{message:'会话不存在'});
-      const message=String(input.message||'').trim();if(!message)return json(res,400,{message:'消息不能为空'});
-      if(input.editMessageId){db.updateMessage(input.editMessageId,message);db.deleteMessagesAfter(conversationId,input.editMessageId);} 
-      const userMessage=input.editMessageId?db.messages(conversationId).find(item=>item.id===input.editMessageId)!:db.addMessage(conversationId,'user',message,input.quotedMessageId||null);
-      if(conversation.title==='新对话')db.updateConversation(conversationId,{title:message.slice(0,28)});
-      const attachments=await saveAttachments(Array.isArray(input.attachments)?input.attachments:[],userMessage.id);
-      const turnId=crypto.randomUUID();const model=String(input.model||conversation.defaultModel||'');db.createTurn(turnId,conversationId,model);
-      const send=sse(res);const mode=validThinking(input.thinkingMode||conversation.thinkingMode),depth=validDepth(input.thinkingDepth||conversation.thinkingDepth);
-      if(mode==='always'||(mode==='auto'&&complexTask(message)))send({type:'thinking.summary',conversationId,turnId,text:complexTask(message)?'我会先梳理目标和约束，再检查结果是否可用。':'我会快速整理关键信息后回答。'});
-      try {
-        const recalled=await memory.recall({message,conversationId,projectId:conversation.projectId});
-        if(wantsHold(message)){await memory.remember({content:message,title:message.slice(0,40),scope:conversation.projectId?'project':'long_term',projectId:conversation.projectId,importance:7,sourceType:'chat',sourceId:conversationId,provenance:`Chat ${conversationId}`});}
-        const project=conversation.projectId?db.project(conversation.projectId):null;
-        const cwd=project?workspace.projectDir(project.id):workspaceRoot;
-        let threadId=conversation.codexThreadId;
-        if(!threadId){threadId=await codex.createThread(cwd,model);db.updateConversation(conversationId,{codexThreadId:threadId});}
-        const before=project?await workspace.changedPaths(project.id):[];
-        const textAttachments=await Promise.all(attachments.filter(a=>a.mime.startsWith('text/')||/\.(md|txt|json|csv)$/i.test(a.name)).map(async a=>`附件 ${a.name}：\n${(await readFile(a.absolutePath,'utf8')).slice(0,200000)}`));
-        const recentMessages=db.messages(conversationId).filter(item=>item.id!==userMessage.id);
-        const socialContext=wantsMomentsContext(message)?moments.social.recentActivity(10).map(item=>`${moments.social.actor(item.actorId)?.nickname||item.actorId} ${item.type==='post'?'发布':'评论'}：${item.text}`).join('\n').slice(0,3000):'';
-        const context=[buildTurnContext({identity:await personaText(),retrievedMemory:recalled.content,recentMessages,projectName:project?.name,socialContext,runtimeState:recalled.degraded?'Ombre Brain 离线，当前使用本地记忆索引。':'Ombre Brain 已连接。'}),...textAttachments].filter(Boolean).join('\n\n');
-        let reply='';
-        const result=await codex.run({threadId,text:`${context}\n\n用户消息：${message}`,model,effort:depth==='deep'?'high':'low',cwd,attachments:attachments.filter(a=>a.mime.startsWith('image/')).map(a=>({absolutePath:a.absolutePath})),onTurnStarted:(codexTurnId)=>activeTurns.set(turnId,{threadId,codexTurnId}),onEvent:event=>{
-          if(event.type==='delta'){reply+=event.text;send({type:'assistant.delta',conversationId,turnId,text:event.text});}
-          if(event.type==='tool-started'||event.type==='tool-completed')send({type:event.type==='tool-started'?'tool.started':'tool.completed',conversationId,turnId,tool:event.tool});
-        }});
-        const assistant=db.addMessage(conversationId,'assistant',reply||result.text);db.finishTurn(turnId,'completed',result.turnId);
-        if(isSociallyMeaningful(message)) socialLife.recordEvent({type:'chat_turn',actorId:'soren',targetId:conversationId,summary:`最近聊天里，用户说：${message.slice(0,260)}\nSoren 回应：${assistant.content.slice(0,260)}`,importance:wantsHold(message)?8:6,privacy:'private',metadata:{conversationId}});
-        if(project){const after=await workspace.changedPaths(project.id);const changed=[...new Set([...before,...after])];if(changed.length){await workspace.commit(project.id,`Soren: ${message.slice(0,72)}`);db.touchProject(project.id);socialLife.recordEvent({type:'workspace_change',actorId:'soren',targetId:project.id,summary:`Workspace 项目「${project.name}」完成了一次修改：${changed.slice(0,8).join('、')}`,importance:7,privacy:'private',metadata:{projectId:project.id,paths:changed.slice(0,20)}});send({type:'file.changed',conversationId,turnId,projectId:project.id,paths:changed});}}
-        send({type:'turn.completed',conversationId,turnId,messageId:assistant.id});res.end();
-      } catch(error:any){db.finishTurn(turnId,'error');send({type:'turn.error',conversationId,turnId,message:error?.message||'Soren Runtime 出错'});res.end();} finally{activeTurns.delete(turnId);}
-      return;
-    }
-    match=route(path,/^\/api\/conversations\/([^/]+)\/turns\/([^/]+)\/cancel$/);
-    if(match&&req.method==='POST'){const active=activeTurns.get(match[2]);if(!active)return json(res,404,{message:'这一轮已经结束'});await codex.cancel(active.threadId,active.codexTurnId);db.finishTurn(match[2],'cancelled',active.codexTurnId);return json(res,200,{cancelled:true});}
-
-    if(req.method==='GET'&&path==='/api/projects'){const projects=await Promise.all(db.projectRows().map(async row=>({...conversationRow(row),gitStatus:(await workspace.changedPaths(row.id)).length?'changed':'clean'})));return json(res,200,{projects});}
-    if(req.method==='POST'&&path==='/api/projects'){const input=await body(req),name=cleanName(input.name,'新项目'),type=['web','markdown','files'].includes(input.type)?input.type:'files',id=slugifyProject(name),at=new Date().toISOString();await workspace.createProject(id,name,type);const project={id,name,directory:id,type,previewEntry:type==='web'?'index.html':type==='markdown'?'README.md':null,createdAt:at,updatedAt:at};db.addProject(project as any);return json(res,201,{project:{...project,gitStatus:'clean'}});}
-    match=route(path,/^\/api\/projects\/([^/]+)$/);if(match&&req.method==='GET'){const project=db.project(match[1]);if(!project)return json(res,404,{message:'项目不存在'});return json(res,200,{project:conversationRow(project),files:await workspace.listFiles(match[1])});}
-    match=route(path,/^\/api\/projects\/([^/]+)\/files$/);if(match&&req.method==='GET'){return json(res,200,{files:await workspace.listFiles(match[1])});}
-    match=route(path,/^\/api\/projects\/([^/]+)\/preview\/(.+)$/);
-    if(match&&req.method==='GET'){
-      const filePath=decodeURIComponent(match[2]);let content=await workspace.read(match[1],filePath);const extension=extname(filePath).toLowerCase();
-      if(extension==='.html'){
-        const bridge=`<script>(()=>{const send=(level,args)=>parent.postMessage({source:'soren-preview',level,args:args.map(value=>{try{return typeof value==='string'?value:JSON.stringify(value)}catch{return String(value)}})},'*');for(const level of ['log','info','warn','error']){const original=console[level];console[level]=(...args)=>{send(level,args);original.apply(console,args)}};addEventListener('error',event=>send('error',[event.message]));})();<\/script>`;
-        content=content.includes('<head>')?content.replace('<head>',`<head><base href="/api/projects/${match[1]}/preview/">${bridge}`):`<base href="/api/projects/${match[1]}/preview/">${bridge}${content}`;
-      }
-      const types:Record<string,string>={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.md':'text/markdown; charset=utf-8'};
-      res.writeHead(200,{'Content-Type':types[extension]||'text/plain; charset=utf-8','Content-Security-Policy':"default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; frame-ancestors 'self'"});return res.end(content);
-    }
-    match=route(path,/^\/api\/projects\/([^/]+)\/file$/);
-    if(match&&req.method==='GET'){const filePath=url.searchParams.get('path')||'';return json(res,200,{path:filePath,content:await workspace.read(match[1],filePath)});}
-    if(match&&req.method==='PUT'){const input=await body(req);const result=await workspace.write(match[1],String(input.path||''),String(input.content??''));db.touchProject(match[1]);return json(res,200,{file:result});}
-    match=route(path,/^\/api\/projects\/([^/]+)\/commit$/);if(match&&req.method==='POST'){const input=await body(req);return json(res,200,{commit:await workspace.commit(match[1],cleanName(input.message,'Save version'))});}
-    match=route(path,/^\/api\/projects\/([^/]+)\/history$/);if(match&&req.method==='GET')return json(res,200,{history:await workspace.history(match[1])});
-    match=route(path,/^\/api\/projects\/([^/]+)\/diff$/);if(match&&req.method==='GET')return json(res,200,{diff:await workspace.diff(match[1],url.searchParams.get('commit')||undefined)});
-    match=route(path,/^\/api\/projects\/([^/]+)\/restore$/);if(match&&req.method==='POST'){const input=await body(req);return json(res,200,{commit:await workspace.restore(match[1],String(input.commit||''))});}
-
-    if(req.method==='POST'&&path==='/api/memory/breath'){const result=await memory.surface();return json(res,200,result);}
-    if(req.method==='POST'&&path==='/api/memory/search'){const input=await body(req),result=await memory.recall({message:String(input.query||''),conversationId:'memory-ui',projectId:null});return json(res,200,result);}
-    if(req.method==='POST'&&path==='/api/memory/hold'){const input=await body(req),result=await memory.remember({content:String(input.content||''),title:String(input.title||''),scope:input.scope||'long_term',projectId:input.projectId||null,importance:Number(input.importance)||6,pinned:Boolean(input.pinned),sourceType:'manual',provenance:'Memory UI'});return json(res,200,{content:result.degraded?'已保存在本地，Ombre 恢复后可同步。':'已写入共享记忆。',...result});}
-    if(req.method==='GET'&&path==='/api/memories')return json(res,200,{records:memory.list(url.searchParams.get('q')||''),status:await memory.status()});
-    match=route(path,/^\/api\/memories\/([^/]+)$/);if(match&&req.method==='PATCH'){const input=await body(req),record=await memory.update(match[1],input);if(!record)return json(res,404,{message:'记忆不存在'});return json(res,200,{record});}
-    if(req.method==='POST'&&path==='/api/memory/seed/preview'){const input=await body(req);return json(res,200,memory.previewSeed(input.seed));}
-    if(req.method==='POST'&&path==='/api/memory/seed/import'){const input=await body(req);return json(res,200,await memory.importSeed(input.seed));}
-    if(req.method==='GET'&&path==='/api/mcp'){const tools:any=await ombre.tools().catch(()=>({tools:[]}));return json(res,200,{servers:[{id:'ombre',name:'Ombre Brain',status:await memory.status(),tools:tools?.tools||tools?.result?.tools||[]}],permissions:db.permissions(),audit:db.audits()});}
-    if(req.method==='PUT'&&path==='/api/mcp/permissions'){const input=await body(req);const item=input as ToolPermission;if(!['always_allow','ask_each_time','disabled'].includes(item.permission))return json(res,400,{message:'无效权限'});db.setPermission(item);db.audit(item.server,item.tool,'permission_changed',item.permission);return json(res,200,{permission:item});}
-    if(req.method==='GET'&&path==='/api/events')return json(res,200,{events:events.events(Number(url.searchParams.get('limit')||50))});
-    if(req.method==='GET'&&path==='/api/notifications')return json(res,200,{notifications:events.notifications({channel:url.searchParams.get('channel')||'',status:url.searchParams.get('status')||'',limit:Number(url.searchParams.get('limit')||50)})});
-    match=route(path,/^\/api\/notifications\/([^/]+)\/(delivered|read)$/);if(match&&req.method==='POST'){const notification=match[2]==='read'?events.markRead(match[1]):events.markDelivered(match[1]);if(!notification)return json(res,404,{message:'通知不存在'});return json(res,200,{notification});}
-    if(req.method==='POST'&&path==='/api/proactive/messages'){if(db.setting('proactivePaused',false))return json(res,409,{message:'主动功能已暂停'});const input=await body(req),content=String(input.content||'').trim();if(!content)return json(res,400,{message:'主动消息不能为空'});const sourceId=String(input.sourceId||crypto.randomUUID()),result=events.emit({type:'assistant.proactive_message',sourceType:'soren',sourceId,title:String(input.title||'Soren'),body:content.slice(0,4000),dedupeKey:input.dedupeKey?String(input.dedupeKey):undefined,conversationId:input.conversationId?String(input.conversationId):null,payload:{reason:String(input.reason||'')}}),chat=result.notifications.find(item=>item.deliveryChannel==='chat');return json(res,201,{...result,conversation:chat?.conversationId?db.conversationById(chat.conversationId):null});}
-    if(req.method==='GET'&&path==='/api/settings')return json(res,200,{settings:db.settings(),persona:Object.fromEntries(await Promise.all(Object.keys(personaDefaults).map(async name=>[name,await readFile(join(personaRoot,name),'utf8')])))});
-    if(req.method==='PUT'&&path==='/api/settings'){const input=await body(req);for(const [key,value]of Object.entries(input.settings||{}))db.setSetting(key,value);for(const [name,content]of Object.entries(input.persona||{})){if(!(name in personaDefaults))continue;await writeFile(join(personaRoot,name),String(content),'utf8');}return json(res,200,{saved:true});}
-    if(path.startsWith('/api/'))return json(res,404,{message:'Unknown API route'});
-    return serveStatic(req,res);
-  } catch(error:any){const message=error?.message||'Soren Core error';const status=/拒绝|无效文件路径/.test(message)?403:/不存在|不能为空|无效|必须/.test(message)?400:500;return json(res,status,{message});}
-});
-setInterval(()=>{for(const reminder of cyberboss.pollDue()){events.emit({type:reminder.important?'reminder.important':'reminder.due',sourceType:'reminder',sourceId:String(reminder.id),title:reminder.important?'重要提醒':'提醒',body:String(reminder.text||''),dedupeKey:`reminder:due:${reminder.id}`,payload:{dueAt:reminder.dueAt,important:Boolean(reminder.important)}});}},5000).unref();
+let cleanupPromise:Promise<void>|null=null;
+function cleanup(){return cleanupPromise??=(async()=>{clearInterval(reminderTimer);cyberDaddy.stop();socialLife.stop();await codex.dispose().catch(()=>undefined);db.close();})();}
+server.on('close',()=>{void cleanup();});
+async function shutdown(){clearInterval(reminderTimer);cyberDaddy.stop();socialLife.stop();if(server.listening)await new Promise<void>(resolveClose=>server.close(()=>resolveClose()));await cleanup();}
+process.once('SIGINT',()=>{void shutdown();});process.once('SIGTERM',()=>{void shutdown();});
 server.listen(port,host,()=>console.log(`Soren Core v2 running at http://${host}:${port}`));

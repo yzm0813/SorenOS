@@ -7,16 +7,17 @@ type PendingEvents=ReturnType<MomentsService['social']['pendingEvents']>;
 const randomBetween=(minimum:number,maximum:number)=>minimum+Math.random()*(maximum-minimum);
 const future=(minimumMinutes:number,maximumMinutes:number)=>new Date(Date.now()+randomBetween(minimumMinutes,maximumMinutes)*60_000).toISOString();
 
+/** Experimental prototype. Phase 5.5 freezes this scope to fixes and safety work. */
 export class SocialLifeEngine {
   private running=false;
   private timer:NodeJS.Timeout|null=null;
   readonly dailyLimit=4;
   readonly dailyInteractionLimit=12;
   constructor(private readonly db:SorenDatabase,private readonly moments:MomentsService,private readonly generator:SocialGenerator){}
-  start(){if(this.timer)return;if(!this.db.setting<string>('momentsNextEvaluationAt',''))this.db.setSetting('momentsNextEvaluationAt',future(10,45));this.timer=setInterval(()=>void this.pulse(),60_000);this.timer.unref();void this.pulse();}
+  start(){if(this.timer)return;if(this.db.setting('momentsLifeEnabled',true)&&!this.db.setting('proactivePaused',false)&&!this.db.setting<string>('momentsNextEvaluationAt',''))this.db.setSetting('momentsNextEvaluationAt',future(10,45));this.timer=setInterval(()=>void this.pulse(),60_000);this.timer.unref();void this.pulse();}
   stop(){if(this.timer)clearInterval(this.timer);this.timer=null;}
   status():SocialLifeStatus{return{enabled:this.db.setting('momentsLifeEnabled',true)&&!this.db.setting('proactivePaused',false),running:this.running,nextEvaluationAt:this.db.setting<string|null>('momentsNextEvaluationAt',null),lastEvaluationAt:this.db.setting<string|null>('momentsLastEvaluationAt',null),lastOutcome:this.db.setting('momentsLastOutcome','尚未评估'),generatedToday:this.moments.social.generatedToday(),dailyLimit:this.dailyLimit};}
-  recordEvent(input:{type:string;actorId?:string|null;targetId?:string|null;summary:string;importance?:number;privacy?:string;metadata?:Record<string,unknown>}){const dueAt=future(input.importance&&input.importance>=8?10:45,input.importance&&input.importance>=8?90:360),event=this.moments.social.addEvent({...input,dueAt});this.moments.social.nudgeEvaluation(dueAt);return event;}
+  recordEvent(input:{type:string;actorId?:string|null;targetId?:string|null;summary:string;importance?:number;privacy?:string;metadata?:Record<string,unknown>}){if(!this.db.setting('momentsLifeEnabled',true)||this.db.setting('proactivePaused',false))return null;const dueAt=future(input.importance&&input.importance>=8?10:45,input.importance&&input.importance>=8?90:360),event=this.moments.social.addEvent({...input,dueAt});this.moments.social.nudgeEvaluation(dueAt);return event;}
   async pulse(force=false){
     if(this.running)return this.status();
     const enabled=this.db.setting('momentsLifeEnabled',true)&&!this.db.setting('proactivePaused',false),next=this.db.setting<string>('momentsNextEvaluationAt','');

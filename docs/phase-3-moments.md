@@ -81,3 +81,4 @@ SQLite schema v5 在 Phase 3 表之上新增：
 ## 运行边界
 
 自主生成只在 Soren Core 运行且 Codex app-server 可用时发生。Codex 离线时，现有朋友圈、点赞与评论仍可正常使用；生活引擎退避后再试。图片目前使用持久化的生活照片描述卡，真实图片上传或图像生成不阻塞动态系统。
+> `SocialLifeEngine` 当前属于实验性原型。Phase 5.5 起功能范围冻结，只接受缺陷、测试和安全修复；关闭 `momentsLifeEnabled` 会停止自主动态、自动回应排程和新的 social-life 事件写入，手动浏览、发布、点赞和评论仍可使用。

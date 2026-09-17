@@ -1,13 +1,13 @@
-import type { Commitment, CommitmentFollowUp, CommitmentRecurrence, CyberDaddyDomain, CyberDaddyIntensity, CyberDaddySnapshot, FollowUpAction } from '@soren/shared';
+import type { Commitment, CommitmentFollowUp, CommitmentRecurrence, CyberDaddyDomain, CyberDaddyIntensity, CyberDaddySnapshot } from '@soren/shared';
 import type { SorenDatabase } from './db.js';
 import type { EventService } from './event-service.js';
+import { hasObviousHighBurden, RuleBasedCyberDaddyEvaluator, type CyberDaddyContextEvaluator } from './cyberdaddy-evaluator.js';
 
 const nowIso=()=>new Date().toISOString();
 const parse=<T>(value:unknown,fallback:T):T=>{try{return JSON.parse(String(value)) as T;}catch{return fallback;}};
 const bool=(value:unknown)=>Boolean(Number(value));
 const validIntensity=(value:unknown):CyberDaddyIntensity=>value==='gentle'||value==='daddy'?value:'normal';
 const validTime=(value:unknown,fallback:string)=>/^([01]\d|2[0-3]):[0-5]\d$/.test(String(value||''))?String(value):fallback;
-const addMinutes=(date:Date,minutes:number)=>new Date(date.getTime()+minutes*60_000).toISOString();
 const dateKey=(date:Date)=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 const dailyTarget=(at:Date,time:string,nextIfPast:boolean)=>{const[hours,minutes]=time.split(':').map(Number),target=new Date(at);target.setHours(hours,minutes,0,0);if(nextIfPast&&target.getTime()<=at.getTime())target.setDate(target.getDate()+1);return target;};
 const validRecurrence=(value:unknown):CommitmentRecurrence=>value==='daily'?'daily':'none';
@@ -16,13 +16,12 @@ const defaultDomains=[
   ['sleep','作息'],['study','学习 / IELTS'],['career','求职'],['fitness','运动'],['projects','个人项目'],['habits','生活习惯']
 ] as const;
 
-interface Decision {action:FollowUpAction;message:string;reason:string;nextMinutes:number|null;}
-
 export class CyberDaddyService {
   private timer:NodeJS.Timeout|null=null;
   private running=false;
   readonly dailyLimit=6;
-  constructor(private readonly db:SorenDatabase,private readonly events:EventService,private readonly clock:()=>Date=()=>new Date()){this.ensureDomains();}
+  private readonly rules=new RuleBasedCyberDaddyEvaluator();
+  constructor(private readonly db:SorenDatabase,private readonly events:EventService,private readonly clock:()=>Date=()=>new Date(),private readonly contextualEvaluator:CyberDaddyContextEvaluator|null=null){this.ensureDomains();}
 
   start(){if(this.timer)return;this.timer=setInterval(()=>void this.pulse(),60_000);this.timer.unref();void this.pulse();}
   stop(){if(this.timer)clearInterval(this.timer);this.timer=null;}
@@ -41,19 +40,13 @@ export class CyberDaddyService {
     if(this.isQuiet(at))return this.halt('当前处于安静时间');
     if(this.followUpsToday(at)>=this.dailyLimit)return this.halt('今天的主动跟进已经达到上限');
     this.advanceRecurring(at);const commitment=this.dueCommitments(at)[0];if(!commitment){const next=this.nextScheduled(at);return this.halt(next?`下一次跟进：${new Date(next.targetAt!).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}`:'没有已安排时间的承诺');}
-    const domain=this.domain(commitment.domainId)!;const decision=this.evaluate(commitment,domain,at),sequence=commitment.followUpCount+1;let eventId:string|null=null;
+    const domain=this.domain(commitment.domainId)!;const decision=await this.evaluate(commitment,domain,at),sequence=commitment.followUpCount+1;let eventId:string|null=null;
     if(decision.message){const emitted=this.events.emit({type:'cyberdaddy.followup_due',sourceType:'commitment',sourceId:commitment.id,title:'Soren',body:decision.message,dedupeKey:`cyberdaddy:${commitment.id}:followup:${sequence}`,conversationId:commitment.sourceConversationId,payload:{domainId:domain.id,intensity:domain.intensity,action:decision.action}});eventId=emitted.event.id;}
-    const delivered=Boolean(decision.message),next=decision.nextMinutes==null?null:addMinutes(at,decision.nextMinutes);this.db.db.transaction(()=>{this.db.db.prepare('INSERT INTO commitment_followups VALUES (?,?,?,?,?,?,?)').run(crypto.randomUUID(),commitment.id,decision.action,decision.message,decision.reason,eventId,at.toISOString());this.db.db.prepare('UPDATE commitments SET last_followup_at=?,next_followup_at=?,followup_count=followup_count+?,cycle_followup_count=cycle_followup_count+?,updated_at=? WHERE id=?').run(delivered?at.toISOString():commitment.lastFollowUpAt,next,delivered?1:0,delivered?1:0,at.toISOString(),commitment.id);})();this.finish(`${domain.name} · ${decision.action} · ${decision.reason}`);
+    const delivered=Boolean(decision.message),next=decision.nextEligibleFollowUpAt||(!delivered?new Date(at.getTime()+60*60_000).toISOString():null);this.db.db.transaction(()=>{this.db.db.prepare('INSERT INTO commitment_followups VALUES (?,?,?,?,?,?,?)').run(crypto.randomUUID(),commitment.id,decision.action,decision.message,decision.reason,eventId,at.toISOString());this.db.db.prepare('UPDATE commitments SET last_followup_at=?,next_followup_at=?,followup_count=followup_count+?,cycle_followup_count=cycle_followup_count+?,updated_at=? WHERE id=?').run(delivered?at.toISOString():commitment.lastFollowUpAt,next,delivered?1:0,delivered?1:0,at.toISOString(),commitment.id);})();this.finish(`${domain.name} · ${decision.action} · ${decision.reason}`);
   }catch(error:any){this.finish(`跟进失败：${String(error?.message||error).slice(0,180)}`);}finally{this.running=false;}return this.snapshot();}
 
-  private evaluate(commitment:Commitment,domain:CyberDaddyDomain,at:Date):Decision{const context=this.recentUserContext(commitment),burden=/(累|疲惫|生病|不舒服|医院|家里.{0,6}(急事|出事)|急事|崩溃|失眠|没睡|exhausted|sick|emergency)/i.test(context),count=commitment.recurrence==='daily'?commitment.cycleFollowUpCount:commitment.followUpCount;
-    if(burden)return{action:count?'CHECK_IN':'REDUCE_TASK',message:count?`今天状态不对，这件事先不追进度。你只要告诉我：继续、缩小，还是推迟。`:`我记得你答应了「${commitment.description}」。但今天先缩小一点，做十分钟就算开始；实在不行就告诉我推迟。`,reason:'近期聊天显示用户负担较重',nextMinutes:commitment.recurrence==='daily'?null:domain.intensity==='daddy'?180:720};
-    if(commitment.recurrence==='daily'){const message=domain.intensity==='gentle'?`今天也提醒一下：${commitment.description}。不急着回。`:domain.intensity==='daddy'?`到今天的时间了：${commitment.description}。去做，别拿明天替今天。`:`今天的「${commitment.description}」到时间了。`;return{action:'REMIND',message,reason:'每日承诺本周期提醒',nextMinutes:null};}
-    if(domain.intensity==='gentle')return{action:'REMIND',message:`提醒一下：${commitment.description}。不急着现在回。`,reason:'Gentle 只做一次轻提醒',nextMinutes:null};
-    if(domain.intensity==='daddy'){const messages=count===0?`该兑现了：${commitment.description}。告诉我你现在开始，还是给我一个明确的新时间。`:count===1?`我还记得「${commitment.description}」。进度给我，哪怕只做了第一步。`:`回来确认一下：${commitment.description}。继续、缩小，或者改时间，选一个。`;return{action:count?'FOLLOW_UP':'REMIND',message:messages,reason:count?'Daddy Mode 持续但有限地跟进':'承诺已到期',nextMinutes:[90,180,360,720][Math.min(count,3)]};}
-    return{action:count?'FOLLOW_UP':'REMIND',message:count?`我回来确认一下「${commitment.description}」。做了多少，或者需要改到几点？`:`你之前答应了「${commitment.description}」。现在还做吗？`,reason:count?'Normal 对未完成承诺进行有限跟进':'承诺已到期',nextMinutes:count>=2?null:count===1?720:240};
-  }
-  private dueCommitments(at:Date){return(this.db.db.prepare(`SELECT commitments.*,cyberdaddy_domains.intensity domain_intensity FROM commitments JOIN cyberdaddy_domains ON cyberdaddy_domains.id=commitments.domain_id WHERE commitments.status='active' AND cyberdaddy_domains.enabled=1 AND commitments.target_at IS NOT NULL AND commitments.target_at<=? AND ((commitments.cycle_followup_count=0 AND commitments.last_followup_at IS NULL) OR (commitments.next_followup_at IS NOT NULL AND commitments.next_followup_at<=?)) ORDER BY COALESCE(commitments.next_followup_at,commitments.target_at)`).all(at.toISOString(),at.toISOString()) as any[]).map(this.mapCommitment).filter(item=>(item.recurrence==='daily'?item.cycleFollowUpCount:item.followUpCount)<this.maxFollowUps(this.domain(item.domainId)?.intensity||'normal'));}
+  private async evaluate(commitment:Commitment,domain:CyberDaddyDomain,at:Date){const input={commitment,domain,now:at,recentUserContext:this.recentUserContext(commitment)},simple=hasObviousHighBurden(input.recentUserContext)||commitment.recurrence==='daily'||(domain.intensity==='gentle'&&commitment.followUpCount===0),enabled=this.db.setting('cyberdaddyContextEvaluatorEnabled',false);if(simple||!enabled||!this.contextualEvaluator)return this.rules.evaluate(input);try{return await this.contextualEvaluator.evaluate(input);}catch{return this.rules.evaluate(input);}}
+  private dueCommitments(at:Date){return(this.db.db.prepare(`SELECT commitments.*,cyberdaddy_domains.intensity domain_intensity FROM commitments JOIN cyberdaddy_domains ON cyberdaddy_domains.id=commitments.domain_id WHERE commitments.status='active' AND cyberdaddy_domains.enabled=1 AND commitments.target_at IS NOT NULL AND commitments.target_at<=? AND ((commitments.cycle_followup_count=0 AND commitments.last_followup_at IS NULL AND commitments.next_followup_at IS NULL) OR (commitments.next_followup_at IS NOT NULL AND commitments.next_followup_at<=?)) ORDER BY COALESCE(commitments.next_followup_at,commitments.target_at)`).all(at.toISOString(),at.toISOString()) as any[]).map(this.mapCommitment).filter(item=>(item.recurrence==='daily'?item.cycleFollowUpCount:item.followUpCount)<this.maxFollowUps(this.domain(item.domainId)?.intensity||'normal'));}
   private nextScheduled(at:Date){const row=this.db.db.prepare(`SELECT commitments.* FROM commitments JOIN cyberdaddy_domains ON cyberdaddy_domains.id=commitments.domain_id WHERE commitments.status='active' AND cyberdaddy_domains.enabled=1 AND commitments.target_at>? ORDER BY commitments.target_at LIMIT 1`).get(at.toISOString()) as any;return row?this.mapCommitment(row):null;}
   private advanceRecurring(at:Date){const today=dateKey(at),rows=this.db.db.prepare("SELECT * FROM commitments WHERE status='active' AND recurrence='daily' AND (cycle_key IS NULL OR cycle_key<?)").all(today) as any[];for(const row of rows){const commitment=this.mapCommitment(row),target=dailyTarget(at,commitment.recurrenceTime||'09:00',false);this.db.db.prepare('UPDATE commitments SET target_at=?,cycle_key=?,cycle_followup_count=0,last_followup_at=NULL,next_followup_at=NULL,updated_at=? WHERE id=?').run(target.toISOString(),today,at.toISOString(),commitment.id);}}
   private recentUserContext(commitment:Commitment){const rows=commitment.sourceConversationId?this.db.db.prepare(`SELECT content FROM messages WHERE conversation_id=? AND role='user' AND created_at>=? ORDER BY created_at DESC LIMIT 8`).all(commitment.sourceConversationId,commitment.createdAt):this.db.db.prepare(`SELECT content FROM messages WHERE role='user' AND created_at>=? ORDER BY created_at DESC LIMIT 8`).all(commitment.createdAt);return(rows as any[]).map(row=>row.content).join('\n');}

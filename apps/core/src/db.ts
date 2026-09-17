@@ -15,6 +15,7 @@ export class SorenDatabase {
     this.db.pragma('foreign_keys = ON');
     applyMigrations(this.db);
   }
+  close() { if (this.db.open) this.db.close(); }
   conversations(search = '', archived = false): Conversation[] {
     const rows = this.db.prepare(`SELECT * FROM conversations WHERE archived = ? AND title LIKE ? ORDER BY updated_at DESC`).all(archived ? 1 : 0, `%${search}%`) as any[];
     return rows.map(this.conversation);
