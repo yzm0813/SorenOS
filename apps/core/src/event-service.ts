@@ -14,6 +14,7 @@ export interface EmitEventInput {
   dedupeKey?:string;
   conversationId?:string|null;
 }
+export interface SystemDeliverySink{enqueue(notification:NotificationRecord):void;}
 
 const deliveryPolicy:Record<string,DeliveryChannel[]>={
   'home_note.created':['in_app'],
@@ -21,12 +22,13 @@ const deliveryPolicy:Record<string,DeliveryChannel[]>={
   'assistant.proactive_message':['chat','system'],
   'reminder.important':['chat','system'],
   'cyberdaddy.followup_due':['chat','system'],
+  'push.test':['system'],
 };
 
 export class EventService {
-  constructor(private readonly db:SorenDatabase){}
+  constructor(private readonly db:SorenDatabase,private readonly systemDelivery?:SystemDeliverySink){}
 
-  emit(input:EmitEventInput){return this.db.db.transaction(()=>{
+  emit(input:EmitEventInput){const result=this.db.db.transaction(()=>{
     const sourceId=String(input.sourceId||''),dedupeKey=String(input.dedupeKey||`${input.type}:${input.sourceType}:${sourceId||crypto.randomUUID()}`),at=now(),eventId=crypto.randomUUID();
     this.db.db.prepare(`INSERT OR IGNORE INTO domain_events (id,type,source_type,source_id,title,body,payload_json,dedupe_key,occurred_at) VALUES (?,?,?,?,?,?,?,?,?)`).run(eventId,input.type,input.sourceType,sourceId,String(input.title||'').slice(0,200),String(input.body||'').slice(0,4000),JSON.stringify(input.payload||{}),dedupeKey,at);
     const eventRow=this.db.db.prepare('SELECT * FROM domain_events WHERE dedupe_key=?').get(dedupeKey) as any;
@@ -35,9 +37,9 @@ export class EventService {
       this.db.db.prepare(`INSERT OR IGNORE INTO notifications (id,event_id,type,source_type,source_id,delivery_channel,status,title,body,conversation_id,created_at,delivered_at,read_at,dedupe_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(crypto.randomUUID(),eventRow.id,input.type,input.sourceType,sourceId,channel,status,String(input.title||'').slice(0,200),String(input.body||'').slice(0,4000),input.conversationId||null,at,status==='delivered'?at:null,null,dedupeKey);
     }
     const chat=this.db.db.prepare("SELECT * FROM notifications WHERE event_id=? AND delivery_channel='chat' AND status='pending'").get(eventRow.id) as any;
-    if(chat){const conversation=this.ensureProactiveConversation(input.conversationId||chat.conversation_id),message=this.db.addMessage(conversation.id,'assistant',String(input.body||input.title||'').trim());this.db.db.prepare("UPDATE notifications SET status='delivered',conversation_id=?,delivered_at=? WHERE id=?").run(conversation.id,message.createdAt,chat.id);}
+    if(chat){const conversation=this.ensureProactiveConversation(input.conversationId||chat.conversation_id),message=this.db.addMessage(conversation.id,'assistant',String(input.body||input.title||'').trim());this.db.db.prepare('UPDATE notifications SET conversation_id=?,message_id=? WHERE event_id=?').run(conversation.id,message.id,eventRow.id);this.db.db.prepare("UPDATE notifications SET status='delivered',delivered_at=? WHERE id=?").run(message.createdAt,chat.id);}
     return{event:this.mapEvent(eventRow),notifications:this.notificationsForEvent(eventRow.id)};
-  })();}
+  })();const system=result.notifications.find(item=>item.deliveryChannel==='system'&&item.status==='pending');if(system)this.systemDelivery?.enqueue(system);return result;}
 
   events(limit=50){return(this.db.db.prepare('SELECT * FROM domain_events ORDER BY occurred_at DESC LIMIT ?').all(Math.max(1,Math.min(200,limit))) as any[]).map(this.mapEvent);}
   notifications(input:{channel?:string;status?:string;limit?:number}={}){const channel=String(input.channel||''),status=String(input.status||''),limit=Math.max(1,Math.min(200,Number(input.limit)||50));return(this.db.db.prepare(`SELECT * FROM notifications WHERE (?='' OR delivery_channel=?) AND (?='' OR status=?) ORDER BY created_at DESC LIMIT ?`).all(channel,channel,status,status,limit) as any[]).map(this.mapNotification);}
@@ -47,5 +49,5 @@ export class EventService {
   private notificationsForEvent(eventId:string){return(this.db.db.prepare('SELECT * FROM notifications WHERE event_id=? ORDER BY delivery_channel').all(eventId) as any[]).map(this.mapNotification);}
   private notification(id:string){const row=this.db.db.prepare('SELECT * FROM notifications WHERE id=?').get(id) as any;return row?this.mapNotification(row):null;}
   private mapEvent=(row:any):DomainEvent=>({id:row.id,type:row.type,sourceType:row.source_type,sourceId:row.source_id,title:row.title,body:row.body,payload:parse(row.payload_json,{}),dedupeKey:row.dedupe_key,occurredAt:row.occurred_at});
-  private mapNotification=(row:any):NotificationRecord=>({id:row.id,eventId:row.event_id,type:row.type,sourceType:row.source_type,sourceId:row.source_id,deliveryChannel:row.delivery_channel,status:row.status,title:row.title,body:row.body,conversationId:row.conversation_id,createdAt:row.created_at,deliveredAt:row.delivered_at,readAt:row.read_at,dedupeKey:row.dedupe_key});
+  private mapNotification=(row:any):NotificationRecord=>({id:row.id,eventId:row.event_id,type:row.type,sourceType:row.source_type,sourceId:row.source_id,deliveryChannel:row.delivery_channel,status:row.status,title:row.title,body:row.body,conversationId:row.conversation_id,messageId:row.message_id||null,createdAt:row.created_at,deliveredAt:row.delivered_at,readAt:row.read_at,dedupeKey:row.dedupe_key});
 }

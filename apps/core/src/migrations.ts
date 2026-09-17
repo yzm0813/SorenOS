@@ -293,6 +293,41 @@ export const migrations: SchemaMigration[] = [
       );
     `,
   },
+  {
+    version: 10,
+    name: 'web_push_delivery',
+    sql: `
+      ALTER TABLE notifications ADD COLUMN message_id TEXT;
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id TEXT PRIMARY KEY,
+        endpoint TEXT NOT NULL UNIQUE,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        device_label TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_success_at TEXT,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        disabled_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS push_deliveries (
+        id TEXT PRIMARY KEY,
+        notification_id TEXT NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+        subscription_id TEXT NOT NULL REFERENCES push_subscriptions(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        last_error_code TEXT,
+        next_attempt_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sent_at TEXT,
+        UNIQUE(notification_id,subscription_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_push_subscriptions_active ON push_subscriptions(disabled_at,updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_push_deliveries_pending ON push_deliveries(status,next_attempt_at,created_at);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0;

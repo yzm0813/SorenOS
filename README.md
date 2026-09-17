@@ -29,6 +29,12 @@ pnpm --filter @soren/core dev
 
 打开 `http://127.0.0.1:8787`。Codex app-server 默认使用 `ws://127.0.0.1:8765`，Ombre Brain 默认使用 `http://127.0.0.1:18001/mcp`。
 
+## PWA 与系统通知
+
+复制 `.env.example` 为 `.env`，用 `pnpm --filter @soren/core exec web-push generate-vapid-keys` 生成一对 VAPID keys，并填写 `SOREN_VAPID_PUBLIC_KEY`、`SOREN_VAPID_PRIVATE_KEY` 与 `SOREN_VAPID_SUBJECT`。`.env` 已被 Git 忽略，私钥不得提交。重启 Core 后，在 `Settings → 通知` 中由用户主动连接设备并发送测试通知。
+
+当前 Core 只监听 localhost；安全边界、手机真机前置条件和操作说明见 [`docs/MOBILE_PRESENCE_ARCHITECTURE.md`](docs/MOBILE_PRESENCE_ARCHITECTURE.md) 与 [`docs/MOBILE_TEST_GUIDE.md`](docs/MOBILE_TEST_GUIDE.md)，常驻方案比较见 [`docs/ALWAYS_ON_PRESENCE_PLAN.md`](docs/ALWAYS_ON_PRESENCE_PLAN.md)。
+
 当前架构、已实现范围、API 与数据库迁移基线见 [`docs/phase-0-baseline.md`](docs/phase-0-baseline.md)，Home 的数据与降级规则见 [`docs/phase-1-home.md`](docs/phase-1-home.md)，统一身份、跨 Chat 召回与 Memory Seed 见 [`docs/phase-2-memory.md`](docs/phase-2-memory.md)，本地动态、评论和未读规则见 [`docs/phase-3-moments.md`](docs/phase-3-moments.md)，统一事件、投递规则与去重机制见 [`docs/phase-4-events.md`](docs/phase-4-events.md)，Soren 督促、承诺和安静时间见 [`docs/phase-5-cyberdaddy.md`](docs/phase-5-cyberdaddy.md)。Cyberboss 复用边界见 [`docs/phase-5-cyberboss-reuse.md`](docs/phase-5-cyberboss-reuse.md)。
 
 ## 隐私边界

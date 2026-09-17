@@ -6,4 +6,7 @@ import './home.css';
 import './memory.css';
 import './moments.css';
 import './cyberdaddy.css';
+import './mobile.css';
+import { registerServiceWorker } from './push-client';
+void registerServiceWorker();
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

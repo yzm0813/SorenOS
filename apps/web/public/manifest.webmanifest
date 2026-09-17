@@ -1,0 +1,13 @@
+{
+  "name":"SorenOS",
+  "short_name":"Soren",
+  "description":"Soren 私人聊天与创作空间",
+  "start_url":"/?source=pwa",
+  "scope":"/",
+  "display":"standalone",
+  "background_color":"#edf3f5",
+  "theme_color":"#153748",
+  "icons":[
+    {"src":"/soren-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}

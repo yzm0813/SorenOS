@@ -33,6 +33,8 @@ SorenOS 中只有一个 Soren。Chat、Home、Moments、CyberDaddy、Workspace�
 
 版本写在 `SOREN_CORE.md` 一级标题中，例如 `Soren Core v0.1`。`PersonaService` 在加载时解析并校验版本；健康检查、Bootstrap、Settings 与启动日志暴露当前版本。数据库不保存 Core 副本，Persona 版本与 Memory、数据库 schema 版本互相独立。
 
+Settings 只读展示正式 `SOREN_CORE.md`，不能直接编辑它。Core 通过版本化文件随 SorenOS 发布；版本变化暂不自动创建新的 Codex thread，每轮运行仍注入当前最新 Core。
+
 ## Social actors
 
 NPC 可以继续使用 `social_actors.personality` 中各自独立的人格。`actorId=soren` 是例外：数据库字段只保留“由 SOREN_CORE.md 提供”的标记，生成器必须加载统一 Core。SocialLife prompt 只描述状态、事件、允许动作和 JSON 输出协议。
@@ -40,3 +42,5 @@ NPC 可以继续使用 `social_actors.personality` 中各自独立的人格。`a
 ## 扩展规则
 
 任何新模块生成 Soren 内容时，都应依赖 `SorenIdentitySource`，使用 `identity()`、`text()` 或 `scene()`。不得复制 Core 文本、硬编码另一组 Soren 性格词、创建模块专属 Persona 文件，或让模型切换改变身份来源。
+
+Soren 的长期 mood/activity 最终以 Soren Self State 为权威来源；`social_actor_state` 中 `actorId=soren` 的重叠字段留待后续小型迁移，本阶段不改数据。Home Note 自动生成在 Mobile Presence 稳定前暂缓。Self State 继续采用现有写入白名单，本阶段不扩大写权限。

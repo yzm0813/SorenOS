@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { loadEnvFile } from 'node:process';
 import { CodexRuntime } from '@soren/runtime-codex';
 import { WorkspaceService } from '@soren/workspace';
 import { OmbreMemory } from '@soren/memory';
@@ -16,6 +17,8 @@ import { EventService } from './event-service.js';
 import { CyberDaddyService } from './cyberdaddy-service.js';
 import { PersonaService } from './persona-service.js';
 import { SelfStateService } from './self-state-service.js';
+import { WebPushNotificationProvider } from './web-push-provider.js';
+import { PushDeliveryService } from './push-delivery-service.js';
 import { ConversationTurnService } from './conversation-turn-service.js';
 import { createHttpTools,type RouteHandler } from './http/index.js';
 import { createStaticHandler } from './static-handler.js';
@@ -30,6 +33,7 @@ import { createSettingsRoutes } from './routes/settings.js';
 import { createMcpRoutes } from './routes/mcp.js';
 
 const appRoot=fileURLToPath(new URL('../../../',import.meta.url));
+try{loadEnvFile(join(appRoot,'.env'));}catch(error:any){if(error?.code!=='ENOENT')throw error;}
 const dataRoot=resolve(process.env.SOREN_DATA_ROOT||resolve(appRoot,'..','data'));
 const workspaceRoot=join(dataRoot,'workspace'),personaRoot=join(appRoot,'persona'),attachmentRoot=join(dataRoot,'attachments'),logRoot=join(dataRoot,'logs'),momentsRuntimeRoot=join(dataRoot,'moments-runtime'),webDist=join(appRoot,'dist');
 await Promise.all([dataRoot,workspaceRoot,attachmentRoot,logRoot,momentsRuntimeRoot].map(path=>mkdir(path,{recursive:true})));
@@ -39,7 +43,7 @@ const homeNote=db.ensureHomeNote('我在这里。今天想说话，或者想一�
 const workspace=new WorkspaceService(workspaceRoot);await workspace.init();
 const persona=new PersonaService(personaRoot);await persona.init();const identity=await persona.identity();
 const ombre=new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT||'http://127.0.0.1:18001/mcp');
-const memory=new MemoryService(ombre,db),selfState=new SelfStateService(db),events=new EventService(db),cyberDaddy=new CyberDaddyService(db,events);
+const memory=new MemoryService(ombre,db),selfState=new SelfStateService(db),pushProvider=new WebPushNotificationProvider({publicKey:process.env.SOREN_VAPID_PUBLIC_KEY||'',privateKey:process.env.SOREN_VAPID_PRIVATE_KEY||'',subject:process.env.SOREN_VAPID_SUBJECT||''}),push=new PushDeliveryService(db,pushProvider),events=new EventService(db,push),cyberDaddy=new CyberDaddyService(db,events);
 const moments=new MomentsService(db,post=>events.emit({type:'moment.created',sourceType:'moment',sourceId:post.id,title:`${post.actor.nickname} 的朋友圈`,body:post.content||post.imageDescription,payload:{authorId:post.authorId}}));
 const codex=new CodexRuntime(process.env.CODEX_APP_SERVER_ENDPOINT||'ws://127.0.0.1:8765');
 const socialLife=new SocialLifeEngine(db,moments,new CodexSocialGenerator(codex,db,momentsRuntimeRoot,persona),selfState);
@@ -52,17 +56,17 @@ const routes:RouteHandler[]=[
   createHomeRoutes({db,events,moments,cyberboss,weatherProvider,memory,codex,homeNote,persona,http:httpTools}),
   createConversationRoutes({db,turns,http:httpTools}),createWorkspaceRoutes({db,workspace,http:httpTools}),createMemoryRoutes({memory,http:httpTools}),
   createMomentsRoutes({moments,socialLife,db,http:httpTools}),createCyberDaddyRoutes({service:cyberDaddy,http:httpTools}),
-  createNotificationRoutes({db,events,http:httpTools}),createSettingsRoutes({db,persona,selfState,http:httpTools}),createMcpRoutes({ombre,memory,db,http:httpTools})
+  createNotificationRoutes({db,events,push,http:httpTools}),createSettingsRoutes({db,persona,selfState,http:httpTools}),createMcpRoutes({ombre,memory,db,http:httpTools})
 ];
 const serveStatic=createStaticHandler(webDist,httpTools);
 
 const server=http.createServer(async(req,res)=>{if(req.method==='OPTIONS'){res.writeHead(204,httpTools.cors());res.end();return;}const url=new URL(req.url||'/',`http://${req.headers.host}`),context={req,res,url,path:url.pathname};try{for(const route of routes)if(await route(context))return;if(url.pathname.startsWith('/api/'))return httpTools.json(res,404,{message:'Unknown API route'});await serveStatic(req,res);}catch(error:any){const message=error?.message||'Soren Core error',status=/拒绝|无效文件路径/.test(message)?403:/不存在|不能为空|无效|必须/.test(message)?400:500;httpTools.json(res,status,{message});}});
 
-socialLife.start();cyberDaddy.start();
+socialLife.start();cyberDaddy.start();push.start();
 const reminderTimer=setInterval(()=>{for(const reminder of cyberboss.pollDue()){events.emit({type:reminder.important?'reminder.important':'reminder.due',sourceType:'reminder',sourceId:String(reminder.id),title:reminder.important?'重要提醒':'提醒',body:String(reminder.text||''),dedupeKey:`reminder:due:${reminder.id}`,payload:{dueAt:reminder.dueAt,important:Boolean(reminder.important)}});}},5000);reminderTimer.unref();
 
 let cleanupPromise:Promise<void>|null=null;
-function cleanup(){return cleanupPromise??=(async()=>{clearInterval(reminderTimer);cyberDaddy.stop();socialLife.stop();await codex.dispose().catch(()=>undefined);db.close();})();}
+function cleanup(){return cleanupPromise??=(async()=>{clearInterval(reminderTimer);cyberDaddy.stop();socialLife.stop();push.stop();await codex.dispose().catch(()=>undefined);db.close();})();}
 server.on('close',()=>{void cleanup();});
 async function shutdown(){clearInterval(reminderTimer);cyberDaddy.stop();socialLife.stop();if(server.listening)await new Promise<void>(resolveClose=>server.close(()=>resolveClose()));await cleanup();}
 process.once('SIGINT',()=>{void shutdown();});process.once('SIGTERM',()=>{void shutdown();});

@@ -193,6 +193,7 @@ export interface NotificationRecord {
   title: string;
   body: string;
   conversationId: string | null;
+  messageId: string | null;
   createdAt: string;
   deliveredAt: string | null;
   readAt: string | null;
@@ -300,6 +301,19 @@ export interface SorenSelfState {
   lastMeaningfulLifeEvents: string[];
   updatedAt: string;
 }
+
+export interface PushSubscriptionRecord {
+  id:string;
+  endpoint:string;
+  deviceLabel:string;
+  createdAt:string;
+  updatedAt:string;
+  lastSuccessAt:string|null;
+  failureCount:number;
+  disabledAt:string|null;
+}
+
+export type PushDeliveryStatus='pending'|'sent'|'failed'|'suppressed'|'invalid_subscription';
 
 export type TurnEvent =
   | { type: 'assistant.delta'; conversationId: string; turnId: string; text: string }

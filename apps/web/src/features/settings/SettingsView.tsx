@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { MapPin, Save, Search } from 'lucide-react';
 import type { DomainEvent, NotificationRecord, WeatherLocation } from '@soren/shared';
 import { api } from '../../api';
+import { pushStatus, sendTestPush, subscribeThisDevice, unsubscribeThisDevice, type PushUiStatus } from '../../push-client';
 
 type Diagnostics={events:DomainEvent[];notifications:NotificationRecord[]};
 
@@ -10,17 +11,21 @@ export function SettingsView(){
   const[persona,setPersona]=useState<Record<string,string>>({});
   const[mcp,setMcp]=useState<any>({servers:[],permissions:[]});
   const[diagnostics,setDiagnostics]=useState<Diagnostics>({events:[],notifications:[]});
-  const[notificationPermission,setNotificationPermission]=useState(typeof Notification==='undefined'?'unsupported':Notification.permission);
+  const[push,setPush]=useState<PushUiStatus|null>(null),[pushBusy,setPushBusy]=useState(false),[pushError,setPushError]=useState('');
   const[activePersona,setActivePersona]=useState('SOREN_CORE.md'),[saved,setSaved]=useState(false);
   const[locationQuery,setLocationQuery]=useState(''),[locations,setLocations]=useState<WeatherLocation[]>([]),[searching,setSearching]=useState(false);
 
   useEffect(()=>{
     api<any>('/api/settings').then(data=>{setSettings(data.settings);setPersona(data.persona);if(data.settings.weatherLocation)setLocationQuery(data.settings.weatherLocation.name)});
     api<any>('/api/mcp').then(setMcp).catch(()=>{});
+    pushStatus().then(setPush).catch(error=>setPushError(error.message));
     Promise.all([api<{events:DomainEvent[]}>('/api/events?limit=8'),api<{notifications:NotificationRecord[]}>('/api/notifications?limit=8')]).then(([eventData,notificationData])=>setDiagnostics({events:eventData.events,notifications:notificationData.notifications})).catch(()=>{});
   },[]);
 
-  const save=async()=>{await api('/api/settings',{method:'PUT',body:JSON.stringify({settings,persona})});setSaved(true);setTimeout(()=>setSaved(false),1800);};
+  const save=async()=>{await api('/api/settings',{method:'PUT',body:JSON.stringify({settings})});setSaved(true);setTimeout(()=>setSaved(false),1800);};
+  const enablePush=async()=>{setPushBusy(true);setPushError('');try{const next={...settings,systemNotificationsEnabled:true};await api('/api/settings',{method:'PUT',body:JSON.stringify({settings:next})});setSettings(next);setPush(await subscribeThisDevice());}catch(error:any){setPushError(error.message||'连接失败');}finally{setPushBusy(false);}};
+  const disablePush=async()=>{setPushBusy(true);setPushError('');try{setPush(await unsubscribeThisDevice());}catch(error:any){setPushError(error.message||'断开失败');}finally{setPushBusy(false);}};
+  const testPush=async()=>{setPushBusy(true);setPushError('');try{await sendTestPush();}catch(error:any){setPushError(error.message||'测试失败');}finally{setPushBusy(false);}};
   const findLocations=async()=>{if(locationQuery.trim().length<2)return;setSearching(true);try{setLocations((await api<{locations:WeatherLocation[]}>(`/api/weather/locations?q=${encodeURIComponent(locationQuery)}`)).locations);}finally{setSearching(false);}};
   const selected=settings.weatherLocation as WeatherLocation|undefined;
 
@@ -39,11 +44,12 @@ export function SettingsView(){
 
         <h2>通知</h2>
         <label className="toggle-row"><span><strong>系统通知</strong><small>只用于主动 Chat 和重要提醒；Home 与朋友圈不会弹出</small></span><input type="checkbox" checked={Boolean(settings.systemNotificationsEnabled)} onChange={event=>setSettings({...settings,systemNotificationsEnabled:event.target.checked})}/></label>
-        {notificationPermission!=='unsupported'&&<button className="permission-button" disabled={notificationPermission!=='default'} onClick={async()=>setNotificationPermission(await Notification.requestPermission())}>系统权限：{notificationPermission==='granted'?'已允许':notificationPermission==='denied'?'已拒绝，请在浏览器设置中重新允许':'点击授权'}</button>}
+        <div className="push-device"><strong>{push?.subscribed?'这台设备已连接':'这台设备未连接'}</strong><small>{!push?.browserSupported?'当前浏览器不支持 Web Push':push.permission==='denied'?'浏览器已拒绝通知，请在站点设置中重新允许':!push.serverConfigured?'Soren Core 尚未配置推送密钥':`浏览器权限：${push.permission==='granted'?'已允许':'尚未询问'} · 已连接 ${push.activeDevices} 台设备`}</small><div>{push?.subscribed?<><button onClick={testPush} disabled={pushBusy||!settings.systemNotificationsEnabled}>发送测试通知</button><button onClick={disablePush} disabled={pushBusy}>断开此设备</button></>:<button className="primary" onClick={enablePush} disabled={pushBusy||!push?.browserSupported||!push?.serverConfigured||push?.permission==='denied'}>{pushBusy?'正在连接':'连接此设备'}</button>}</div>{pushError&&<p className="setting-error">{pushError}</p>}<p className="setting-help">推送依赖运行中的 Soren Core；只有点击“连接此设备”才会请求浏览器权限。</p></div>
 
         <h2>Persona</h2>
         <div className="persona-tabs">{Object.keys(persona).map(name=><button className={activePersona===name?'active':''} onClick={()=>setActivePersona(name)} key={name}>{name.replace('.md','')}</button>)}</div>
-        <textarea className="persona-editor" value={persona[activePersona]||''} onChange={event=>setPersona({...persona,[activePersona]:event.target.value})}/>
+        <textarea className="persona-editor" value={persona[activePersona]||''} readOnly aria-label="只读 Persona"/>
+        <p className="setting-help">正式 Core 是版本化身份文件，只随 SorenOS 发布更新；Settings 仅供查看。</p>
       </article>
 
       <article className="panel">
