@@ -59,7 +59,7 @@ const routes:RouteHandler[]=[
   createHomeRoutes({db,events,moments,cyberboss,weatherProvider,memory,codex,homeNote,persona,network,http:httpTools}),
   createConversationRoutes({db,turns,http:httpTools}),createWorkspaceRoutes({db,workspace,http:httpTools}),createMemoryRoutes({memory,http:httpTools}),
   createMomentsRoutes({moments,socialLife,db,http:httpTools}),createCyberDaddyRoutes({service:cyberDaddy,http:httpTools}),
-  createNotificationRoutes({db,events,push,http:httpTools}),createSettingsRoutes({db,persona,selfState,http:httpTools}),createMcpRoutes({ombre,memory,db,http:httpTools})
+  createNotificationRoutes({db,events,push,http:httpTools,logRoot}),createSettingsRoutes({db,persona,selfState,http:httpTools}),createMcpRoutes({ombre,memory,db,http:httpTools})
 ];
 const serveStatic=createStaticHandler(webDist,httpTools);
 

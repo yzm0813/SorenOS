@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { MapPin, Save, Search } from 'lucide-react';
 import type { DomainEvent, NotificationRecord, WeatherLocation } from '@soren/shared';
 import { api } from '../../api';
-import { pushStatus, sendTestPush, subscribeThisDevice, unsubscribeThisDevice, type PushUiStatus } from '../../push-client';
+import { currentNotificationPermission, pushStatus, sendTestPush, subscribeThisDevice, unsubscribeThisDevice, type PushProgress, type PushUiStatus } from '../../push-client';
 
 type Diagnostics={events:DomainEvent[];notifications:NotificationRecord[]};
+const stageLabels:Record<string,string>={permission_request:'请求通知权限',permission_granted:'通知权限已允许',service_worker_ready:'等待 Service Worker',push_subscription_created:'创建浏览器推送订阅',subscription_post_started:'保存订阅到 Soren Core',subscription_post_success:'设备连接完成'};
+const stageLabel=(stage?:string)=>stageLabels[stage||'']||'连接此设备';
 
 export function SettingsView(){
   const[settings,setSettings]=useState<Record<string,any>>({});
@@ -12,7 +14,7 @@ export function SettingsView(){
   const[mcp,setMcp]=useState<any>({servers:[],permissions:[]});
   const[diagnostics,setDiagnostics]=useState<Diagnostics>({events:[],notifications:[]});
   const[network,setNetwork]=useState<{lanMode:boolean;secure:boolean;authentication:boolean;phoneUrl:string|null}|null>(null);
-  const[push,setPush]=useState<PushUiStatus|null>(null),[pushBusy,setPushBusy]=useState(false),[pushError,setPushError]=useState('');
+  const[push,setPush]=useState<PushUiStatus|null>(null),[pushBusy,setPushBusy]=useState(false),[pushError,setPushError]=useState(''),[pushProgress,setPushProgress]=useState<PushProgress|null>(null);
   const[activePersona,setActivePersona]=useState('SOREN_CORE.md'),[saved,setSaved]=useState(false);
   const[locationQuery,setLocationQuery]=useState(''),[locations,setLocations]=useState<WeatherLocation[]>([]),[searching,setSearching]=useState(false);
 
@@ -25,7 +27,7 @@ export function SettingsView(){
   },[]);
 
   const save=async()=>{await api('/api/settings',{method:'PUT',body:JSON.stringify({settings})});setSaved(true);setTimeout(()=>setSaved(false),1800);};
-  const enablePush=async()=>{setPushBusy(true);setPushError('');try{const next={...settings,systemNotificationsEnabled:true};await api('/api/settings',{method:'PUT',body:JSON.stringify({settings:next})});setSettings(next);setPush(await subscribeThisDevice());}catch(error:any){setPushError(error.message||'连接失败');}finally{setPushBusy(false);}};
+  const enablePush=async()=>{setPushBusy(true);setPushError('');setPushProgress(null);try{const next={...settings,systemNotificationsEnabled:true};await api('/api/settings',{method:'PUT',body:JSON.stringify({settings:next})});setSettings(next);setPush(await subscribeThisDevice('此设备',progress=>{setPushProgress(progress);if(progress.permission)setPush(previous=>previous?{...previous,permission:progress.permission!}:previous);}));}catch(error:any){const permission=currentNotificationPermission();setPush(previous=>previous?{...previous,permission}:previous);setPushError(`${stageLabel(error.stage||pushProgress?.stage)}：${error.message||'连接失败'}`);void pushStatus().then(setPush).catch(()=>{});}finally{setPushBusy(false);}};
   const disablePush=async()=>{setPushBusy(true);setPushError('');try{setPush(await unsubscribeThisDevice());}catch(error:any){setPushError(error.message||'断开失败');}finally{setPushBusy(false);}};
   const testPush=async()=>{setPushBusy(true);setPushError('');try{await sendTestPush();}catch(error:any){setPushError(error.message||'测试失败');}finally{setPushBusy(false);}};
   const findLocations=async()=>{if(locationQuery.trim().length<2)return;setSearching(true);try{setLocations((await api<{locations:WeatherLocation[]}>(`/api/weather/locations?q=${encodeURIComponent(locationQuery)}`)).locations);}finally{setSearching(false);}};
@@ -46,7 +48,7 @@ export function SettingsView(){
 
         <h2>通知</h2>
         <label className="toggle-row"><span><strong>系统通知</strong><small>只用于主动 Chat 和重要提醒；Home 与朋友圈不会弹出</small></span><input type="checkbox" checked={Boolean(settings.systemNotificationsEnabled)} onChange={event=>setSettings({...settings,systemNotificationsEnabled:event.target.checked})}/></label>
-        <div className="push-device"><strong>{push?.subscribed?'这台设备已连接':'这台设备未连接'}</strong><small>{!push?.browserSupported?'当前浏览器不支持 Web Push':push.permission==='denied'?'浏览器已拒绝通知，请在站点设置中重新允许':!push.serverConfigured?'Soren Core 尚未配置推送密钥':`浏览器权限：${push.permission==='granted'?'已允许':'尚未询问'} · 已连接 ${push.activeDevices} 台设备`}</small><div>{push?.subscribed?<><button onClick={testPush} disabled={pushBusy||!settings.systemNotificationsEnabled}>发送测试通知</button><button onClick={disablePush} disabled={pushBusy}>断开此设备</button></>:<button className="primary" onClick={enablePush} disabled={pushBusy||!push?.browserSupported||!push?.serverConfigured||push?.permission==='denied'}>{pushBusy?'正在连接':'连接此设备'}</button>}</div>{pushError&&<p className="setting-error">{pushError}</p>}<p className="setting-help">推送依赖运行中的 Soren Core；只有点击“连接此设备”才会请求浏览器权限。</p></div>
+        <div className="push-device"><strong>{push?.subscribed?'这台设备已连接':'这台设备未连接'}</strong><small>{!push?.browserSupported?'当前浏览器不支持 Web Push':push.permission==='denied'?'浏览器已拒绝通知，请在站点设置中重新允许':!push.serverConfigured?'Soren Core 尚未配置推送密钥':`浏览器权限：${push.permission==='granted'?'已允许':'尚未询问'} · 已连接 ${push.activeDevices} 台设备`}</small><div>{push?.subscribed?<><button onClick={testPush} disabled={pushBusy||!settings.systemNotificationsEnabled}>发送测试通知</button><button onClick={disablePush} disabled={pushBusy}>断开此设备</button></>:<button className="primary push-connect-button" onClick={enablePush} disabled={pushBusy||!push?.browserSupported||!push?.serverConfigured||push?.permission==='denied'}>{pushBusy?'正在连接':'连接此设备'}</button>}</div>{pushProgress&&<p className={`push-progress ${pushProgress.status}`}>{stageLabel(pushProgress.stage)} · {pushProgress.status==='failed'?'失败':pushProgress.status==='success'?'完成':'进行中'}</p>}{pushError&&<p className="setting-error">{pushError}</p>}<p className="setting-help">推送依赖运行中的 Soren Core；只有点击“连接此设备”才会请求浏览器权限。</p></div>
 
         <h2>Persona</h2>
         <div className="persona-tabs">{Object.keys(persona).map(name=><button className={activePersona===name?'active':''} onClick={()=>setActivePersona(name)} key={name}>{name.replace('.md','')}</button>)}</div>
@@ -56,7 +58,7 @@ export function SettingsView(){
 
       <article className="panel">
         <h2>连接状态</h2>
-        <div className="connection-diagnostics"><div><strong>Core</strong><span>Online</span></div><div><strong>Connection</strong><span>{network?.lanMode?'LAN Test Mode':'Localhost'}</span></div><div><strong>HTTPS</strong><span>{window.isSecureContext?'Secure':'Not secure'}</span></div><div><strong>Authentication</strong><span>{network?.lanMode?'OFF':'Local only'}</span></div><div><strong>Push</strong><span>{push?.browserSupported?'Supported':'Unsupported'}</span></div><div><strong>Permission</strong><span>{push?.permission||'unknown'}</span></div></div>
+        <div className="connection-diagnostics"><div><strong>Core</strong><span>Online</span></div><div><strong>Connection</strong><span>{network?.lanMode?'LAN Test Mode':'Localhost'}</span></div><div><strong>HTTPS</strong><span>{window.isSecureContext?'Secure':'Not secure'}</span></div><div><strong>Authentication</strong><span>{network?.lanMode?'OFF':'Local only'}</span></div><div><strong>Push</strong><span>{push?.browserSupported?'Supported':'Unsupported'}</span></div><div><strong>Permission</strong><span>{currentNotificationPermission()}</span></div></div>
         {network?.lanMode&&<p className="lan-warning">只可在可信私人 Wi-Fi 使用。当前没有登录或设备认证，禁止用于公共、公司、学校、酒店或访客网络。</p>}
         <h2>MCP Connections</h2>
         {mcp.servers?.map((server:any)=><div className="mcp-server" key={server.id}><div><strong>{server.name}</strong><span className={server.status?.connected?'connected':''}>{server.status?.connected?'已连接':'暂不可达'}</span></div>{(server.tools||[]).map((tool:any)=>{const current=mcp.permissions?.find((permission:any)=>permission.server===server.id&&permission.tool===tool.name);return <label key={tool.name}><span>{tool.name}<small>{tool.description}</small></span><select value={current?.permission||'ask_each_time'} onChange={async event=>{const permission={server:server.id,tool:tool.name,permission:event.target.value,risk:/delete|archive|write|exec/i.test(tool.name)?'high':'low'};await api('/api/mcp/permissions',{method:'PUT',body:JSON.stringify(permission)});setMcp({...mcp,permissions:[...(mcp.permissions||[]).filter((item:any)=>!(item.server===server.id&&item.tool===tool.name)),permission]});}}><option value="always_allow">始终允许</option><option value="ask_each_time">每次询问</option><option value="disabled">停用</option></select></label>})}</div>)}

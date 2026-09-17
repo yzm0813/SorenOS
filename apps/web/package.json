@@ -1,6 +1,6 @@
 {
   "name":"@soren/web","version":"0.1.0","private":true,"type":"module",
-  "scripts":{"dev":"vite --host 127.0.0.1 --port 5173","build":"tsc -b && vite build"},
+  "scripts":{"dev":"vite --host 127.0.0.1 --port 5173","build":"tsc -b && vite build","test":"node --test tests/push-flow.test.ts"},
   "dependencies":{"@monaco-editor/react":"^4.7.0","@soren/shared":"workspace:*","dompurify":"^3.2.6","lucide-react":"^0.544.0","marked":"^16.2.1","react":"^19.1.1","react-dom":"^19.1.1","react-markdown":"^10.1.0","remark-gfm":"^4.0.1"},
   "devDependencies":{"@types/react":"^19.1.12","@types/react-dom":"^19.1.9","@vitejs/plugin-react":"^5.0.2","typescript":"^5.9.2","vite":"^7.1.5"}
 }

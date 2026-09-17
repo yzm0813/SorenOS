@@ -9,5 +9,5 @@ import './cyberdaddy.css';
 import './mobile.css';
 import './lan.css';
 import { registerServiceWorker } from './push-client';
-void registerServiceWorker();
+void registerServiceWorker().catch(()=>{});
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);
