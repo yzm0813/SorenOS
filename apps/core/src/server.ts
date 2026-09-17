@@ -33,6 +33,7 @@ import { createNotificationRoutes } from './routes/notifications.js';
 import { createSettingsRoutes } from './routes/settings.js';
 import { createMcpRoutes } from './routes/mcp.js';
 import { LAN_WARNING,resolveNetworkConfig } from './lan.js';
+import { ChatRuntimeManager } from './chat-runtime-manager.js';
 
 const appRoot=fileURLToPath(new URL('../../../',import.meta.url));
 try{loadEnvFile(join(appRoot,'.env'));}catch(error:any){if(error?.code!=='ENOENT')throw error;}
@@ -40,6 +41,8 @@ const network=await resolveNetworkConfig(appRoot);
 const dataRoot=resolve(process.env.SOREN_DATA_ROOT||resolve(appRoot,'..','data'));
 const workspaceRoot=join(dataRoot,'workspace'),personaRoot=join(appRoot,'persona'),attachmentRoot=join(dataRoot,'attachments'),logRoot=join(dataRoot,'logs'),momentsRuntimeRoot=join(dataRoot,'moments-runtime'),webDist=join(appRoot,'dist');
 await Promise.all([dataRoot,workspaceRoot,attachmentRoot,logRoot,momentsRuntimeRoot].map(path=>mkdir(path,{recursive:true})));
+const chatRuntime=new ChatRuntimeManager({endpoint:process.env.CODEX_APP_SERVER_ENDPOINT||'ws://127.0.0.1:8765',cwd:appRoot});
+await chatRuntime.start().catch(error=>console.error(`Chat runtime offline: ${error?.message||error}`));
 
 const db=new SorenDatabase(join(dataRoot,'soren.db'));
 const homeNote=db.ensureHomeNote('我在这里。今天想说话，或者想一起做点什么，都可以来找我。');
@@ -48,15 +51,15 @@ const persona=new PersonaService(personaRoot);await persona.init();const identit
 const ombre=new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT||'http://127.0.0.1:18001/mcp');
 const memory=new MemoryService(ombre,db),selfState=new SelfStateService(db),pushProvider=new WebPushNotificationProvider({publicKey:process.env.SOREN_VAPID_PUBLIC_KEY||'',privateKey:process.env.SOREN_VAPID_PRIVATE_KEY||'',subject:process.env.SOREN_VAPID_SUBJECT||'',proxy:process.env.SOREN_PUSH_PROXY||process.env.HTTPS_PROXY||process.env.HTTP_PROXY||''}),push=new PushDeliveryService(db,pushProvider),events=new EventService(db,push),cyberDaddy=new CyberDaddyService(db,events);
 const moments=new MomentsService(db,post=>events.emit({type:'moment.created',sourceType:'moment',sourceId:post.id,title:`${post.actor.nickname} 的朋友圈`,body:post.content||post.imageDescription,payload:{authorId:post.authorId}}));
-const codex=new CodexRuntime(process.env.CODEX_APP_SERVER_ENDPOINT||'ws://127.0.0.1:8765');
+const codex=new CodexRuntime(chatRuntime.endpoint);
 const socialLife=new SocialLifeEngine(db,moments,new CodexSocialGenerator(codex,db,momentsRuntimeRoot,persona),selfState);
 const require=createRequire(import.meta.url),{CyberbossAdapter}=require(join(appRoot,'soren-core','cyberboss-adapter.cjs')) as {CyberbossAdapter:new(options:any)=>any};
 const cyberboss=new CyberbossAdapter({stateDir:join(dataRoot,'cyberboss')});
 const host=network.host,port=network.port,httpTools=createHttpTools(process.env.SOREN_WEB_ORIGIN||'http://127.0.0.1:5173');
-const turns=new ConversationTurnService({db,memory,workspace,codex,socialLife,moments,persona,selfState,workspaceRoot,attachmentRoot,http:httpTools});
+const turns=new ConversationTurnService({db,memory,workspace,codex,chatRuntime,socialLife,moments,persona,selfState,workspaceRoot,attachmentRoot,http:httpTools});
 const weatherProvider=new OpenMeteoWeatherProvider();
 const routes:RouteHandler[]=[
-  createHomeRoutes({db,events,moments,cyberboss,weatherProvider,memory,codex,homeNote,persona,network,http:httpTools}),
+  createHomeRoutes({db,events,moments,cyberboss,weatherProvider,memory,codex,chatRuntime,homeNote,persona,network,http:httpTools}),
   createConversationRoutes({db,turns,http:httpTools}),createWorkspaceRoutes({db,workspace,http:httpTools}),createMemoryRoutes({memory,http:httpTools}),
   createMomentsRoutes({moments,socialLife,db,http:httpTools}),createCyberDaddyRoutes({service:cyberDaddy,http:httpTools}),
   createNotificationRoutes({db,events,push,http:httpTools,logRoot}),createSettingsRoutes({db,persona,selfState,http:httpTools}),createMcpRoutes({ombre,memory,db,http:httpTools})
@@ -70,7 +73,7 @@ socialLife.start();cyberDaddy.start();push.start();
 const reminderTimer=setInterval(()=>{for(const reminder of cyberboss.pollDue()){events.emit({type:reminder.important?'reminder.important':'reminder.due',sourceType:'reminder',sourceId:String(reminder.id),title:reminder.important?'重要提醒':'提醒',body:String(reminder.text||''),dedupeKey:`reminder:due:${reminder.id}`,payload:{dueAt:reminder.dueAt,important:Boolean(reminder.important)}});}},5000);reminderTimer.unref();
 
 let cleanupPromise:Promise<void>|null=null;
-function cleanup(){return cleanupPromise??=(async()=>{clearInterval(reminderTimer);cyberDaddy.stop();socialLife.stop();push.stop();await codex.dispose().catch(()=>undefined);db.close();})();}
+function cleanup(){return cleanupPromise??=(async()=>{clearInterval(reminderTimer);cyberDaddy.stop();socialLife.stop();push.stop();await codex.dispose().catch(()=>undefined);await chatRuntime.stop().catch(()=>undefined);db.close();})();}
 server.on('close',()=>{if(!lanServer?.listening)void cleanup();});lanServer?.on('close',()=>{if(!server.listening)void cleanup();});
 async function shutdown(){clearInterval(reminderTimer);cyberDaddy.stop();socialLife.stop();const close=(target:http.Server|https.Server|null)=>target?.listening?new Promise<void>(resolveClose=>target.close(()=>resolveClose())):Promise.resolve();await Promise.all([close(server),close(lanServer)]);await cleanup();}
 process.once('SIGINT',()=>{void shutdown();});process.once('SIGTERM',()=>{void shutdown();});

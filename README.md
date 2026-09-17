@@ -27,7 +27,7 @@ pnpm --filter @soren/web build
 pnpm --filter @soren/core dev
 ```
 
-打开 `http://127.0.0.1:8787`。Codex app-server 默认使用 `ws://127.0.0.1:8765`，Ombre Brain 默认使用 `http://127.0.0.1:18001/mcp`。
+打开 `http://127.0.0.1:8787`。Core 会检查仅监听 `ws://127.0.0.1:8765` 的 Codex app-server：已有实例会被复用，没有实例则随 Core 启动并在 Core 关闭时清理。Ombre Brain 默认使用 `http://127.0.0.1:18001/mcp`。
 
 ## PWA 与系统通知
 
@@ -45,7 +45,7 @@ pnpm lan:status
 pnpm lan:start
 ```
 
-`lan:setup` 为当前私人 LAN IP 生成本地 CA 和 HTTPS 证书，`lan:status` 检查 IP 是否变化，`lan:start` 才会显式启用 `SOREN_LAN_MODE=true`。电脑继续使用 `http://127.0.0.1:8787`，手机使用提示的 `https://LAN-IP:8788`。该模式没有认证，只能用于可信家庭网络；完整步骤见 [`docs/MOBILE_TEST_GUIDE.md`](docs/MOBILE_TEST_GUIDE.md)，安全债见 [`docs/LAN_SECURITY_DEBT.md`](docs/LAN_SECURITY_DEBT.md)。
+`lan:setup` 为当前私人 LAN IP 生成本地 CA 和 HTTPS 证书，`lan:status` 检查 IP 是否变化，`lan:start` 才会显式启用 `SOREN_LAN_MODE=true`，并启动 Chat 所需的本机 Codex app-server。电脑继续使用 `http://127.0.0.1:8787`，手机使用提示的 `https://LAN-IP:8788`；8765 始终只绑定 `127.0.0.1`。该模式没有认证，只能用于可信家庭网络；完整步骤见 [`docs/MOBILE_TEST_GUIDE.md`](docs/MOBILE_TEST_GUIDE.md)，安全债见 [`docs/LAN_SECURITY_DEBT.md`](docs/LAN_SECURITY_DEBT.md)。
 
 当前架构、已实现范围、API 与数据库迁移基线见 [`docs/phase-0-baseline.md`](docs/phase-0-baseline.md)，Home 的数据与降级规则见 [`docs/phase-1-home.md`](docs/phase-1-home.md)，统一身份、跨 Chat 召回与 Memory Seed 见 [`docs/phase-2-memory.md`](docs/phase-2-memory.md)，本地动态、评论和未读规则见 [`docs/phase-3-moments.md`](docs/phase-3-moments.md)，统一事件、投递规则与去重机制见 [`docs/phase-4-events.md`](docs/phase-4-events.md)，Soren 督促、承诺和安静时间见 [`docs/phase-5-cyberdaddy.md`](docs/phase-5-cyberdaddy.md)。Cyberboss 复用边界见 [`docs/phase-5-cyberboss-reuse.md`](docs/phase-5-cyberboss-reuse.md)。
 
