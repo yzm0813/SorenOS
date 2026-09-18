@@ -37,6 +37,7 @@ iOS/iPadOS 的 Web Push 只提供给添加到主屏幕的 Web App，且通知权
 - **Push Unsupported**：确认页面是 HTTPS。iPhone/iPad 必须先添加到主屏幕并从桌面图标打开；浏览器和系统本身也必须支持 Web Push。
 - **Permission Denied**：SorenOS 不会反复弹窗。到手机的应用/网站通知设置中重新允许，再回到 Settings。
 - **Test Push 收不到**：按顺序检查 Settings 是否显示 Secure、Supported、Granted、Subscribed、System Notifications On；再确认电脑 Core 在线。不要继续测 CyberDaddy。
+- **Delivery 显示 sent 但手机没有通知**：`sent` 只表示 Web Push 服务已接受；Settings 的通知诊断还会分别显示 `received`（Android Service Worker 收到）和 `displayed`（`showNotification` 成功）。没有 `received` 时检查手机网络/后台限制；有 `received` 但没有 `displayed` 时查看安全错误码。
 - **Core Offline**：重新运行 `pnpm lan:start`。离线 PWA 只显示缓存外壳，不会发送 Chat，也不会凭空产生 Push。
 - **Core Online、Chat Runtime Offline**：Core 已运行，但本机 Codex app-server 没有就绪。查看启动窗口中的 `Chat runtime offline` 提示并重新运行 `pnpm lan:start`；不要把 8765 改成 LAN IP，也不要开放防火墙端口。
 - **LAN IP 变了**：`pnpm lan:status` 会显示证书不匹配。重新运行 `pnpm lan:setup`，重新安装新的 CA 后再 `pnpm lan:start`。

@@ -51,6 +51,8 @@ pnpm lan:start
 
 普通 Chat 中的未来任务通过结构化 scheduling action 创建：一次性任务进入 `scheduled_reminders`，到期只提醒一次；需要重复催促或完成跟进的任务进入 CyberDaddy commitment。Core 使用设置中的用户时区（默认 `Asia/Shanghai`）验证时间，只有持久化成功后 Chat 才会确认。Timeline 同时显示两类计划及其来源和状态。
 
+Settings 的通知诊断区分 Web Push 服务接受（`sent`）、Android Service Worker 收到（`received`）和系统通知展示成功（`displayed`）；诊断只保存 notification ID、类型、渠道、provider、尝试次数、时间和安全错误码，不保存或展示 subscription 密钥。
+
 ## 隐私边界
 
 服务默认只监听 `127.0.0.1`。文件接口只接受项目 ID 和相对路径，并拒绝目录穿越及符号链接；聊天、记忆、附件、日志与 Workspace 文件保存在本机 `data/`。

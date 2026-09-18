@@ -4,7 +4,8 @@ import type { DomainEvent, NotificationRecord, WeatherLocation } from '@soren/sh
 import { api } from '../../api';
 import { currentNotificationPermission, pushStatus, sendTestPush, subscribeThisDevice, unsubscribeThisDevice, type PushProgress, type PushUiStatus } from '../../push-client';
 
-type Diagnostics={events:DomainEvent[];notifications:NotificationRecord[]};
+type PushDeliveryDiagnostic={notificationId:string;type:string;sourceType:string;channel:string;notificationStatus:string;deliveryState:string;provider:string|null;attemptCount:number;safeErrorCode:string|null;createdAt:string;sentAt:string|null;deviceReceivedAt:string|null;displayedAt:string|null;deviceLabel:string|null;subscriptionEnabled:boolean|null};
+type Diagnostics={events:DomainEvent[];notifications:NotificationRecord[];deliveries:PushDeliveryDiagnostic[]};
 const stageLabels:Record<string,string>={permission_request:'请求通知权限',permission_granted:'通知权限已允许',service_worker_ready:'等待 Service Worker',push_subscription_created:'创建浏览器推送订阅',subscription_post_started:'保存订阅到 Soren Core',subscription_post_success:'设备连接完成'};
 const stageLabel=(stage?:string)=>stageLabels[stage||'']||'连接此设备';
 
@@ -12,7 +13,7 @@ export function SettingsView(){
   const[settings,setSettings]=useState<Record<string,any>>({});
   const[persona,setPersona]=useState<Record<string,string>>({});
   const[mcp,setMcp]=useState<any>({servers:[],permissions:[]});
-  const[diagnostics,setDiagnostics]=useState<Diagnostics>({events:[],notifications:[]});
+  const[diagnostics,setDiagnostics]=useState<Diagnostics>({events:[],notifications:[],deliveries:[]});
   const[network,setNetwork]=useState<{lanMode:boolean;secure:boolean;authentication:boolean;phoneUrl:string|null}|null>(null);
   const[chatRuntime,setChatRuntime]=useState<{connected:boolean;managed:boolean;message:string}|null>(null);
   const[push,setPush]=useState<PushUiStatus|null>(null),[pushBusy,setPushBusy]=useState(false),[pushError,setPushError]=useState(''),[pushProgress,setPushProgress]=useState<PushProgress|null>(null);
@@ -24,7 +25,7 @@ export function SettingsView(){
     api<any>('/api/mcp').then(setMcp).catch(()=>{});
     api<any>('/api/bootstrap').then(data=>{setNetwork(data.network);setChatRuntime(data.services?.chatRuntime||null);}).catch(()=>{});
     pushStatus().then(setPush).catch(error=>setPushError(error.message));
-    Promise.all([api<{events:DomainEvent[]}>('/api/events?limit=8'),api<{notifications:NotificationRecord[]}>('/api/notifications?limit=8')]).then(([eventData,notificationData])=>setDiagnostics({events:eventData.events,notifications:notificationData.notifications})).catch(()=>{});
+    Promise.all([api<{events:DomainEvent[]}>('/api/events?limit=8'),api<{notifications:NotificationRecord[]}>('/api/notifications?limit=8'),api<{deliveries:PushDeliveryDiagnostic[]}>('/api/push/deliveries?limit=8')]).then(([eventData,notificationData,deliveryData])=>setDiagnostics({events:eventData.events,notifications:notificationData.notifications,deliveries:deliveryData.deliveries})).catch(()=>{});
   },[]);
 
   const save=async()=>{await api('/api/settings',{method:'PUT',body:JSON.stringify({settings})});setSaved(true);setTimeout(()=>setSaved(false),1800);};
@@ -68,6 +69,7 @@ export function SettingsView(){
         <div className="event-diagnostics">
           {diagnostics.events.length===0?<span>还没有事件记录</span>:diagnostics.events.map(event=><div key={event.id}><strong>{event.type}</strong><small>{new Date(event.occurredAt).toLocaleString('zh-CN')}</small></div>)}
           {diagnostics.notifications.slice(0,4).map(item=><div key={item.id}><strong>{item.deliveryChannel} · {item.status}</strong><small>{item.type}</small></div>)}
+          {diagnostics.deliveries.map(item=><div key={`${item.notificationId}-${item.deviceLabel||'none'}`}><strong>{item.type} · {item.deliveryState}{item.displayedAt?' · displayed':item.deviceReceivedAt?' · received':''}</strong><small>{item.provider||'no provider'} · {item.attemptCount} 次{item.safeErrorCode?` · ${item.safeErrorCode}`:''} · {new Date(item.createdAt).toLocaleString('zh-CN')}</small></div>)}
         </div>
       </article>
     </div>

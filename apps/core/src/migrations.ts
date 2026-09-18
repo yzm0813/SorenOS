@@ -351,6 +351,16 @@ export const migrations: SchemaMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_source ON scheduled_reminders(source_conversation_id,created_at DESC);
     `,
   },
+  {
+    version: 12,
+    name: 'push_device_receipts',
+    sql: `
+      ALTER TABLE push_deliveries ADD COLUMN device_received_at TEXT;
+      ALTER TABLE push_deliveries ADD COLUMN displayed_at TEXT;
+      ALTER TABLE push_deliveries ADD COLUMN device_error_code TEXT;
+      CREATE INDEX IF NOT EXISTS idx_push_deliveries_notification ON push_deliveries(notification_id,created_at);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0;

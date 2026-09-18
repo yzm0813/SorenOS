@@ -56,7 +56,7 @@ test('adopts the legacy schema without losing existing rows', () => {
     const migrated = new SorenDatabase(file);
     assert.equal(migrated.db.pragma('user_version', { simple: true }), latestSchemaVersion);
     assert.equal(migrated.conversationById('kept-conversation')?.title, '保留的会话');
-    assert.deepEqual(migrated.db.prepare('SELECT version,name FROM schema_migrations ORDER BY version').all(), [{ version: 1, name: 'baseline_schema' },{version:2,name:'home_notes'},{version:3,name:'shared_memory_index'},{version:4,name:'moments_feed'},{version:5,name:'social_life_engine'},{version:6,name:'event_notification_layer'},{version:7,name:'cyberdaddy_supervision'},{version:8,name:'recurring_commitments'},{version:9,name:'soren_self_state'},{version:10,name:'web_push_delivery'},{version:11,name:'scheduled_reminders'}]);
+    assert.deepEqual(migrated.db.prepare('SELECT version,name FROM schema_migrations ORDER BY version').all(), [{ version: 1, name: 'baseline_schema' },{version:2,name:'home_notes'},{version:3,name:'shared_memory_index'},{version:4,name:'moments_feed'},{version:5,name:'social_life_engine'},{version:6,name:'event_notification_layer'},{version:7,name:'cyberdaddy_supervision'},{version:8,name:'recurring_commitments'},{version:9,name:'soren_self_state'},{version:10,name:'web_push_delivery'},{version:11,name:'scheduled_reminders'},{version:12,name:'push_device_receipts'}]);
     migrated.db.close();
 
     const reopened = new SorenDatabase(file);
