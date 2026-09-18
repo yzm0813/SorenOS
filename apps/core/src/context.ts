@@ -10,6 +10,7 @@ export interface TurnContextInput{
   projectName?:string;
   socialContext?:string;
   runtimeState?:string;
+  capabilities?:string;
   sceneInstruction?:string;
 }
 
@@ -25,6 +26,7 @@ export function buildTurnContext(input:TurnContextInput){
     section('Recent Conversation',local,6000),
     section('Relevant Social Context',input.socialContext,3000),
     section('Current Runtime State',input.runtimeState,1000),
+    section('Available Capabilities',input.capabilities,6000),
     section('Scene Instruction',input.sceneInstruction,1500)
   ].filter(Boolean).join('\n\n');
   return output.slice(0,TURN_CONTEXT_LIMIT);

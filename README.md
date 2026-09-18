@@ -49,6 +49,8 @@ pnpm lan:start
 
 当前架构、已实现范围、API 与数据库迁移基线见 [`docs/phase-0-baseline.md`](docs/phase-0-baseline.md)，Home 的数据与降级规则见 [`docs/phase-1-home.md`](docs/phase-1-home.md)，统一身份、跨 Chat 召回与 Memory Seed 见 [`docs/phase-2-memory.md`](docs/phase-2-memory.md)，本地动态、评论和未读规则见 [`docs/phase-3-moments.md`](docs/phase-3-moments.md)，统一事件、投递规则与去重机制见 [`docs/phase-4-events.md`](docs/phase-4-events.md)，Soren 督促、承诺和安静时间见 [`docs/phase-5-cyberdaddy.md`](docs/phase-5-cyberdaddy.md)。Cyberboss 复用边界见 [`docs/phase-5-cyberboss-reuse.md`](docs/phase-5-cyberboss-reuse.md)。
 
+普通 Chat 中的未来任务通过结构化 scheduling action 创建：一次性任务进入 `scheduled_reminders`，到期只提醒一次；需要重复催促或完成跟进的任务进入 CyberDaddy commitment。Core 使用设置中的用户时区（默认 `Asia/Shanghai`）验证时间，只有持久化成功后 Chat 才会确认。Timeline 同时显示两类计划及其来源和状态。
+
 ## 隐私边界
 
 服务默认只监听 `127.0.0.1`。文件接口只接受项目 ID 和相对路径，并拒绝目录穿越及符号链接；聊天、记忆、附件、日志与 Workspace 文件保存在本机 `data/`。

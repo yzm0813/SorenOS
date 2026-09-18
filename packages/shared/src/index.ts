@@ -313,6 +313,33 @@ export interface PushSubscriptionRecord {
   disabledAt:string|null;
 }
 
+export type ScheduledReminderStatus='scheduled'|'fired'|'cancelled';
+
+export interface ScheduledReminder {
+  id:string;
+  title:string;
+  status:ScheduledReminderStatus;
+  remindAt:string;
+  timezone:string;
+  sourceConversationId:string|null;
+  sourceMessageId:string|null;
+  createdAt:string;
+  updatedAt:string;
+  firedAt:string|null;
+  eventId:string|null;
+  metadata:Record<string,unknown>;
+}
+
+export interface ScheduledItem {
+  id:string;
+  type:'reminder'|'commitment';
+  title:string;
+  scheduledAt:string|null;
+  status:string;
+  source:'Chat'|'Timeline';
+  sourceConversationId:string|null;
+}
+
 export type PushDeliveryStatus='pending'|'sent'|'failed'|'suppressed'|'invalid_subscription';
 
 export type TurnEvent =
@@ -321,4 +348,4 @@ export type TurnEvent =
   | { type: 'tool.started' | 'tool.completed'; conversationId: string; turnId: string; tool: string }
   | { type: 'file.changed'; conversationId: string; turnId: string; projectId: string; paths: string[] }
   | { type: 'turn.completed'; conversationId: string; turnId: string; messageId: string }
-  | { type: 'turn.error'; conversationId: string; turnId: string; message: string };
+  | { type: 'turn.error'; conversationId: string; turnId: string; code?: string; message: string; retryable?: boolean };

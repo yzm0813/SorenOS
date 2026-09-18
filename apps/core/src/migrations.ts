@@ -328,6 +328,29 @@ export const migrations: SchemaMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_push_deliveries_pending ON push_deliveries(status,next_attempt_at,created_at);
     `,
   },
+  {
+    version: 11,
+    name: 'scheduled_reminders',
+    sql: `
+      CREATE TABLE IF NOT EXISTS scheduled_reminders (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        remind_at TEXT NOT NULL,
+        timezone TEXT NOT NULL,
+        source_conversation_id TEXT,
+        source_message_id TEXT,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        fired_at TEXT,
+        event_id TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_due ON scheduled_reminders(status,remind_at);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_source ON scheduled_reminders(source_conversation_id,created_at DESC);
+    `,
+  },
 ];
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0;

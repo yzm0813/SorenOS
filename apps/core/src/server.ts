@@ -34,6 +34,8 @@ import { createSettingsRoutes } from './routes/settings.js';
 import { createMcpRoutes } from './routes/mcp.js';
 import { LAN_WARNING,resolveNetworkConfig } from './lan.js';
 import { ChatRuntimeManager } from './chat-runtime-manager.js';
+import { ReminderService } from './reminder-service.js';
+import { ScheduleActionService } from './schedule-actions.js';
 
 const appRoot=fileURLToPath(new URL('../../../',import.meta.url));
 try{loadEnvFile(join(appRoot,'.env'));}catch(error:any){if(error?.code!=='ENOENT')throw error;}
@@ -49,17 +51,17 @@ const homeNote=db.ensureHomeNote('我在这里。今天想说话，或者想一�
 const workspace=new WorkspaceService(workspaceRoot);await workspace.init();
 const persona=new PersonaService(personaRoot);await persona.init();const identity=await persona.identity();
 const ombre=new OmbreMemory(process.env.OMBRE_MCP_ENDPOINT||'http://127.0.0.1:18001/mcp');
-const memory=new MemoryService(ombre,db),selfState=new SelfStateService(db),pushProvider=new WebPushNotificationProvider({publicKey:process.env.SOREN_VAPID_PUBLIC_KEY||'',privateKey:process.env.SOREN_VAPID_PRIVATE_KEY||'',subject:process.env.SOREN_VAPID_SUBJECT||'',proxy:process.env.SOREN_PUSH_PROXY||process.env.HTTPS_PROXY||process.env.HTTP_PROXY||''}),push=new PushDeliveryService(db,pushProvider),events=new EventService(db,push),cyberDaddy=new CyberDaddyService(db,events);
+const memory=new MemoryService(ombre,db),selfState=new SelfStateService(db),pushProvider=new WebPushNotificationProvider({publicKey:process.env.SOREN_VAPID_PUBLIC_KEY||'',privateKey:process.env.SOREN_VAPID_PRIVATE_KEY||'',subject:process.env.SOREN_VAPID_SUBJECT||'',proxy:process.env.SOREN_PUSH_PROXY||process.env.HTTPS_PROXY||process.env.HTTP_PROXY||''}),push=new PushDeliveryService(db,pushProvider),events=new EventService(db,push),cyberDaddy=new CyberDaddyService(db,events),reminders=new ReminderService(db,events),scheduleActions=new ScheduleActionService(db,reminders,cyberDaddy);
 const moments=new MomentsService(db,post=>events.emit({type:'moment.created',sourceType:'moment',sourceId:post.id,title:`${post.actor.nickname} 的朋友圈`,body:post.content||post.imageDescription,payload:{authorId:post.authorId}}));
 const codex=new CodexRuntime(chatRuntime.endpoint);
 const socialLife=new SocialLifeEngine(db,moments,new CodexSocialGenerator(codex,db,momentsRuntimeRoot,persona),selfState);
 const require=createRequire(import.meta.url),{CyberbossAdapter}=require(join(appRoot,'soren-core','cyberboss-adapter.cjs')) as {CyberbossAdapter:new(options:any)=>any};
 const cyberboss=new CyberbossAdapter({stateDir:join(dataRoot,'cyberboss')});
 const host=network.host,port=network.port,httpTools=createHttpTools(process.env.SOREN_WEB_ORIGIN||'http://127.0.0.1:5173');
-const turns=new ConversationTurnService({db,memory,workspace,codex,chatRuntime,socialLife,moments,persona,selfState,workspaceRoot,attachmentRoot,http:httpTools});
+const turns=new ConversationTurnService({db,memory,workspace,codex,chatRuntime,scheduleActions,socialLife,moments,persona,selfState,workspaceRoot,attachmentRoot,http:httpTools});
 const weatherProvider=new OpenMeteoWeatherProvider();
 const routes:RouteHandler[]=[
-  createHomeRoutes({db,events,moments,cyberboss,weatherProvider,memory,codex,chatRuntime,homeNote,persona,network,http:httpTools}),
+  createHomeRoutes({db,events,moments,cyberboss,cyberDaddy,reminders,scheduleActions,weatherProvider,memory,codex,chatRuntime,homeNote,persona,network,http:httpTools}),
   createConversationRoutes({db,turns,http:httpTools}),createWorkspaceRoutes({db,workspace,http:httpTools}),createMemoryRoutes({memory,http:httpTools}),
   createMomentsRoutes({moments,socialLife,db,http:httpTools}),createCyberDaddyRoutes({service:cyberDaddy,http:httpTools}),
   createNotificationRoutes({db,events,push,http:httpTools,logRoot}),createSettingsRoutes({db,persona,selfState,http:httpTools}),createMcpRoutes({ombre,memory,db,http:httpTools})
@@ -69,12 +71,12 @@ const serveStatic=createStaticHandler(webDist,httpTools);
 const requestHandler=async(req:IncomingMessage,res:ServerResponse)=>{if(req.method==='OPTIONS'){res.writeHead(204,httpTools.cors());res.end();return;}const protocol='encrypted'in req.socket&&req.socket.encrypted?'https':'http',url=new URL(req.url||'/',`${protocol}://${req.headers.host}`),context={req,res,url,path:url.pathname};try{for(const route of routes)if(await route(context))return;if(url.pathname.startsWith('/api/'))return httpTools.json(res,404,{message:'Unknown API route'});await serveStatic(req,res);}catch(error:any){const message=error?.message||'Soren Core error',status=/拒绝|无效文件路径/.test(message)?403:/不存在|不能为空|无效|必须/.test(message)?400:500;httpTools.json(res,status,{message});}};
 const server=http.createServer(requestHandler),lanServer=network.lanMode?https.createServer({cert:await readFile(network.certificate.certPath),key:await readFile(network.certificate.keyPath)},requestHandler):null;
 
-socialLife.start();cyberDaddy.start();push.start();
+socialLife.start();cyberDaddy.start();reminders.start();push.start();
 const reminderTimer=setInterval(()=>{for(const reminder of cyberboss.pollDue()){events.emit({type:reminder.important?'reminder.important':'reminder.due',sourceType:'reminder',sourceId:String(reminder.id),title:reminder.important?'重要提醒':'提醒',body:String(reminder.text||''),dedupeKey:`reminder:due:${reminder.id}`,payload:{dueAt:reminder.dueAt,important:Boolean(reminder.important)}});}},5000);reminderTimer.unref();
 
 let cleanupPromise:Promise<void>|null=null;
-function cleanup(){return cleanupPromise??=(async()=>{clearInterval(reminderTimer);cyberDaddy.stop();socialLife.stop();push.stop();await codex.dispose().catch(()=>undefined);await chatRuntime.stop().catch(()=>undefined);db.close();})();}
+function cleanup(){return cleanupPromise??=(async()=>{clearInterval(reminderTimer);reminders.stop();cyberDaddy.stop();socialLife.stop();push.stop();await codex.dispose().catch(()=>undefined);await chatRuntime.stop().catch(()=>undefined);db.close();})();}
 server.on('close',()=>{if(!lanServer?.listening)void cleanup();});lanServer?.on('close',()=>{if(!server.listening)void cleanup();});
-async function shutdown(){clearInterval(reminderTimer);cyberDaddy.stop();socialLife.stop();const close=(target:http.Server|https.Server|null)=>target?.listening?new Promise<void>(resolveClose=>target.close(()=>resolveClose())):Promise.resolve();await Promise.all([close(server),close(lanServer)]);await cleanup();}
+async function shutdown(){clearInterval(reminderTimer);reminders.stop();cyberDaddy.stop();socialLife.stop();const close=(target:http.Server|https.Server|null)=>target?.listening?new Promise<void>(resolveClose=>target.close(()=>resolveClose())):Promise.resolve();await Promise.all([close(server),close(lanServer)]);await cleanup();}
 process.once('SIGINT',()=>{void shutdown();});process.once('SIGTERM',()=>{void shutdown();});
 server.listen(port,host,()=>console.log(`Soren Core v2 (${identity.version}) running at http://${host}:${port}`));if(lanServer)lanServer.listen(network.lanPort!,network.lanHost!,()=>console.warn(`\n${LAN_WARNING}\nPhone URL: ${network.phoneUrl}\nHTTPS: ON\nDesktop URL remains http://127.0.0.1:${port}\n`));

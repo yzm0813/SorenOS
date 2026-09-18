@@ -20,6 +20,7 @@ const deliveryPolicy:Record<string,DeliveryChannel[]>={
   'home_note.created':['in_app'],
   'moment.created':['in_app'],
   'assistant.proactive_message':['chat','system'],
+  'reminder.due':['chat','system'],
   'reminder.important':['chat','system'],
   'cyberdaddy.followup_due':['chat','system'],
   'push.test':['system'],
